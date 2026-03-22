@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(flutter --version)"
+      "Bash(flutter --version)",
+      "Bash(gh repo:*)",
+      "Bash(where gh:*)",
+      "Bash(winget install:*)",
+      "Bash(choco --version)",
+      "Bash(choco install:*)",
+      "Bash(mkdir -p ~/flutter)",
+      "Bash(curl -L -o ~/flutter/flutter_sdk.zip https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.5-stable.zip)",
+      "Read(//c/Users/GAIAN SOLUTIONS/flutter/**)",
+      "Bash(unzip -q flutter_sdk.zip)",
+      "Bash(rm flutter_sdk.zip)",
+      "Bash(~/flutter/flutter/bin/flutter --version)",
+      "Bash(export PATH=\"$HOME/flutter/flutter/bin:$PATH\")",
+      "Bash(flutter doctor:*)",
+      "Bash(flutter pub:*)",
+      "Bash(flutter run:*)",
+      "Bash(flutter create:*)"
     ]
   }
 }

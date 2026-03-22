@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/trip_planning/screens/trip_planning_screen.dart';
 import '../../features/trip_planning/screens/route_view_screen.dart';
+import '../../features/trip_planning/models/location.dart';
 import '../../features/location_search/screens/location_search_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
 import '../../features/amenities/screens/amenities_screen.dart';
@@ -26,6 +27,7 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (_) => TripPlanningScreen(
             tripId: args?['tripId'],
+            initialLocation: args?['initialLocation'] as TripLocation?,
           ),
         );
       case routeView:

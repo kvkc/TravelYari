@@ -5,7 +5,9 @@ import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/trip.dart';
+import '../../trip_planning/models/location.dart';
 import '../../shared_location/shared_location_handler.dart';
+import '../../shared_location/widgets/trip_selector_sheet.dart';
 import '../widgets/trip_card.dart';
 import '../widgets/empty_trips_widget.dart';
 
@@ -35,22 +37,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _setupSharedLocationHandler() {
     SharedLocationHandler.setOnLocationReceived((location) {
-      // When a location is shared from another app, create a new trip with it
+      // Show trip selector when a location is shared from another app
+      _showTripSelector(location);
+    });
+  }
+
+  void _showTripSelector(TripLocation location) {
+    TripSelectorSheet.show(
+      context,
+      location: location,
+      onTripSelected: (trip) => _addLocationToTrip(trip, location),
+      onCreateNewTrip: () => _createNewTripWithLocation(location),
+    );
+  }
+
+  void _addLocationToTrip(Trip trip, TripLocation location) async {
+    // Add location to existing trip
+    final updatedTrip = trip.copyWith(
+      locations: [...trip.locations, location],
+    );
+    await StorageService.saveTrip(updatedTrip);
+    _loadTrips();
+
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Location received: ${location.name}'),
+          content: Text('Added "${location.name}" to "${trip.name}"'),
           action: SnackBarAction(
-            label: 'Add to Trip',
-            onPressed: () {
-              Navigator.pushNamed(
-                context,
-                AppRouter.tripPlanning,
-                arguments: {'initialLocation': location},
-              );
-            },
+            label: 'View',
+            onPressed: () => _openTrip(updatedTrip),
           ),
         ),
       );
+    }
+  }
+
+  void _createNewTripWithLocation(TripLocation location) {
+    Navigator.pushNamed(
+      context,
+      AppRouter.tripPlanning,
+      arguments: {'initialLocation': location},
+    ).then((_) {
+      _loadTrips();
     });
   }
 

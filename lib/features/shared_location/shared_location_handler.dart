@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:uni_links/uni_links.dart';
@@ -24,27 +25,42 @@ class SharedLocationHandler {
   }
 
   static void _setupListeners() {
-    // Handle text shared from other apps (WhatsApp location shares, etc.)
-    _sharedTextSubscription = ReceiveSharingIntent.getTextStream().listen(
-      _handleSharedText,
-      onError: (e) => print('Shared text error: $e'),
-    );
+    // Sharing intent only works on mobile platforms
+    if (!kIsWeb) {
+      // Handle text shared from other apps (WhatsApp location shares, etc.)
+      _sharedTextSubscription = ReceiveSharingIntent.instance.getMediaStream().listen(
+        (List<SharedMediaFile> files) {
+          for (var file in files) {
+            if (file.type == SharedMediaType.text || file.type == SharedMediaType.url) {
+              _handleSharedText(file.path);
+            }
+          }
+        },
+        onError: (e) => print('Shared media error: $e'),
+      );
 
-    // Handle initial shared text (when app is opened via share)
-    ReceiveSharingIntent.getInitialText().then((text) {
-      if (text != null) _handleSharedText(text);
-    });
+      // Handle initial shared media (when app is opened via share)
+      ReceiveSharingIntent.instance.getInitialMedia().then((List<SharedMediaFile> files) {
+        for (var file in files) {
+          if (file.type == SharedMediaType.text || file.type == SharedMediaType.url) {
+            _handleSharedText(file.path);
+          }
+        }
+      });
+    }
 
-    // Handle deep links (maps URLs)
-    _linkSubscription = linkStream.listen(
-      _handleDeepLink,
-      onError: (e) => print('Deep link error: $e'),
-    );
+    // Handle deep links (maps URLs) - only on mobile
+    if (!kIsWeb) {
+      _linkSubscription = linkStream.listen(
+        _handleDeepLink,
+        onError: (e) => print('Deep link error: $e'),
+      );
 
-    // Handle initial deep link
-    getInitialLink().then((link) {
-      if (link != null) _handleDeepLink(link);
-    });
+      // Handle initial deep link
+      getInitialLink().then((link) {
+        if (link != null) _handleDeepLink(link);
+      });
+    }
   }
 
   static Future<void> _handleSharedText(String text) async {

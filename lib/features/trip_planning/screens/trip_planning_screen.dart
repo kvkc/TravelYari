@@ -14,10 +14,12 @@ import '../widgets/trip_stats_card.dart';
 
 class TripPlanningScreen extends ConsumerStatefulWidget {
   final String? tripId;
+  final TripLocation? initialLocation;
 
   const TripPlanningScreen({
     super.key,
     this.tripId,
+    this.initialLocation,
   });
 
   @override
@@ -44,11 +46,21 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
       }
     }
 
-    // Create new trip
+    // Create new trip with optional initial location
     _trip = Trip(
-      name: 'New Trip',
+      name: widget.initialLocation != null
+          ? 'Trip to ${widget.initialLocation!.name}'
+          : 'New Trip',
       status: TripStatus.draft,
+      locations: widget.initialLocation != null
+          ? [widget.initialLocation!]
+          : [],
     );
+
+    // Auto-save if we have an initial location
+    if (widget.initialLocation != null) {
+      _saveTrip();
+    }
   }
 
   Future<void> _saveTrip() async {
