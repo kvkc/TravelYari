@@ -1,0 +1,82 @@
+name: yatra_planner
+description: Smart trip planning app with multi-location support, route optimization, and amenity suggestions.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+
+  # Maps & Location
+  google_maps_flutter: ^2.5.3
+  geolocator: ^10.1.0
+  geocoding: ^2.1.1
+  flutter_polyline_points: ^2.0.0
+
+  # Networking
+  dio: ^5.4.0
+  retrofit: ^4.0.3
+
+  # Local Storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  shared_preferences: ^2.2.2
+
+  # UI Components
+  cupertino_icons: ^1.0.6
+  flutter_slidable: ^3.0.1
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.1
+  flutter_rating_bar: ^4.0.1
+
+  # Authentication
+  google_sign_in: ^6.2.1
+  flutter_secure_storage: ^9.0.0
+
+  # Deep Links & Sharing
+  receive_sharing_intent: ^1.6.7
+  uni_links: ^0.5.1
+  share_plus: ^7.2.1
+
+  # Utils
+  url_launcher: ^6.2.2
+  permission_handler: ^11.1.0
+  connectivity_plus: ^5.0.2
+  intl: ^0.19.0
+  uuid: ^4.2.2
+  collection: ^1.18.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.8
+  riverpod_generator: ^2.3.9
+  retrofit_generator: ^8.0.6
+  hive_generator: ^2.0.1
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
