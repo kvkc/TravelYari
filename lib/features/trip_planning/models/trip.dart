@@ -157,6 +157,7 @@ class TripPreferences {
   final bool preferGoodWashrooms;
   final bool findStayOptions;
   final double minHotelRating;
+  final bool autoOptimize; // Auto-optimize route when locations change
 
   TripPreferences({
     this.maxDailyDistanceKm = 450,
@@ -169,6 +170,7 @@ class TripPreferences {
     this.preferGoodWashrooms = true,
     this.findStayOptions = true,
     this.minHotelRating = 3.5,
+    this.autoOptimize = true,
   });
 
   TripPreferences copyWith({
@@ -182,6 +184,7 @@ class TripPreferences {
     bool? preferGoodWashrooms,
     bool? findStayOptions,
     double? minHotelRating,
+    bool? autoOptimize,
   }) {
     return TripPreferences(
       maxDailyDistanceKm: maxDailyDistanceKm ?? this.maxDailyDistanceKm,
@@ -194,6 +197,7 @@ class TripPreferences {
       preferGoodWashrooms: preferGoodWashrooms ?? this.preferGoodWashrooms,
       findStayOptions: findStayOptions ?? this.findStayOptions,
       minHotelRating: minHotelRating ?? this.minHotelRating,
+      autoOptimize: autoOptimize ?? this.autoOptimize,
     );
   }
 
@@ -209,6 +213,7 @@ class TripPreferences {
       'preferGoodWashrooms': preferGoodWashrooms,
       'findStayOptions': findStayOptions,
       'minHotelRating': minHotelRating,
+      'autoOptimize': autoOptimize,
     };
   }
 
@@ -224,6 +229,7 @@ class TripPreferences {
       preferGoodWashrooms: json['preferGoodWashrooms'] ?? true,
       findStayOptions: json['findStayOptions'] ?? true,
       minHotelRating: (json['minHotelRating'] ?? 3.5).toDouble(),
+      autoOptimize: json['autoOptimize'] ?? true,
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/trip/trip_planner_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/trip.dart';
 import '../../trip_planning/models/location.dart';
@@ -53,16 +54,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _addLocationToTrip(Trip trip, TripLocation location) async {
     // Add location to existing trip
-    final updatedTrip = trip.copyWith(
+    var updatedTrip = trip.copyWith(
       locations: [...trip.locations, location],
     );
+
+    // Auto-optimize if enabled and enough locations
+    if (updatedTrip.preferences.autoOptimize && updatedTrip.locations.length >= 2) {
+      try {
+        final plannerService = ref.read(tripPlannerServiceProvider);
+        updatedTrip = await plannerService.generateTripPlan(
+          trip: updatedTrip,
+          startDate: updatedTrip.startDate ?? DateTime.now().add(const Duration(days: 1)),
+        );
+      } catch (e) {
+        // Silently fail - trip is still saved with new location
+        print('Auto-optimize failed: $e');
+      }
+    }
+
     await StorageService.saveTrip(updatedTrip);
     _loadTrips();
 
     if (mounted) {
+      final message = updatedTrip.preferences.autoOptimize && updatedTrip.locations.length >= 2
+          ? 'Added "${location.name}" to "${trip.name}" and optimized route'
+          : 'Added "${location.name}" to "${trip.name}"';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Added "${location.name}" to "${trip.name}"'),
+          content: Text(message),
           action: SnackBarAction(
             label: 'View',
             onPressed: () => _openTrip(updatedTrip),

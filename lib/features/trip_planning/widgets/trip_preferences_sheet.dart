@@ -167,6 +167,17 @@ class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
                   ),
 
                   const SizedBox(height: 24),
+                  _buildSectionTitle('Route Optimization'),
+                  _buildSwitch(
+                    label: 'Auto-optimize route',
+                    subtitle: 'Automatically find the best route when locations change',
+                    value: _preferences.autoOptimize,
+                    onChanged: (v) => setState(() {
+                      _preferences = _preferences.copyWith(autoOptimize: v);
+                    }),
+                  ),
+
+                  const SizedBox(height: 24),
                   _buildSectionTitle('Special Preferences'),
                   _buildSwitch(
                     label: 'Prefer good washrooms',

@@ -80,19 +80,21 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
         );
       });
       await _saveTrip();
+      await _autoOptimizeIfNeeded();
     }
   }
 
-  void _removeLocation(int index) {
+  void _removeLocation(int index) async {
     setState(() {
       final locations = List<TripLocation>.from(_trip.locations);
       locations.removeAt(index);
       _trip = _trip.copyWith(locations: locations);
     });
-    _saveTrip();
+    await _saveTrip();
+    await _autoOptimizeIfNeeded();
   }
 
-  void _reorderLocations(int oldIndex, int newIndex) {
+  void _reorderLocations(int oldIndex, int newIndex) async {
     setState(() {
       if (newIndex > oldIndex) newIndex--;
       final locations = List<TripLocation>.from(_trip.locations);
@@ -100,7 +102,36 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
       locations.insert(newIndex, item);
       _trip = _trip.copyWith(locations: locations);
     });
-    _saveTrip();
+    await _saveTrip();
+    // Don't auto-optimize on reorder - user is manually arranging
+  }
+
+  /// Auto-optimize route if preference is enabled and enough locations
+  Future<void> _autoOptimizeIfNeeded() async {
+    if (!_trip.preferences.autoOptimize) return;
+    if (_trip.locations.length < 2) return;
+    if (_isPlanning) return;
+
+    setState(() => _isPlanning = true);
+
+    try {
+      final plannerService = ref.read(tripPlannerServiceProvider);
+      final plannedTrip = await plannerService.generateTripPlan(
+        trip: _trip,
+        startDate: _trip.startDate ?? DateTime.now().add(const Duration(days: 1)),
+      );
+
+      setState(() {
+        _trip = plannedTrip;
+        _isPlanning = false;
+      });
+
+      await _saveTrip();
+    } catch (e) {
+      setState(() => _isPlanning = false);
+      // Silently fail for auto-optimize - user can manually plan if needed
+      print('Auto-optimize failed: $e');
+    }
   }
 
   Future<void> _planTrip() async {
