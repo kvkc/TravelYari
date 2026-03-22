@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../models/trip.dart';
 import '../models/day_plan.dart';
-import '../models/route_segment.dart' as model;
 
+/// Map widget using OpenStreetMap tiles (free, no API key required)
 class RouteMapWidget extends StatefulWidget {
   final Trip trip;
   final DayPlan? dayPlan;
@@ -23,9 +24,10 @@ class RouteMapWidget extends StatefulWidget {
 }
 
 class _RouteMapWidgetState extends State<RouteMapWidget> {
-  GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
-  Set<Polyline> _polylines = {};
+  final MapController _mapController = MapController();
+  List<Marker> _markers = [];
+  List<Polyline> _polylines = [];
+  bool _mapReady = false;
 
   @override
   void initState() {
@@ -37,76 +39,115 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
   void didUpdateWidget(RouteMapWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dayPlan != widget.dayPlan ||
-        oldWidget.showFullRoute != widget.showFullRoute) {
+        oldWidget.showFullRoute != widget.showFullRoute ||
+        oldWidget.trip.id != widget.trip.id) {
       _buildMapElements();
     }
   }
 
   void _buildMapElements() {
-    final markers = <Marker>{};
-    final polylines = <Polyline>{};
+    final markers = <Marker>[];
+    final polylines = <Polyline>[];
+    final routePoints = <LatLng>[];
 
-    if (widget.showFullRoute) {
+    if (widget.showFullRoute && widget.trip.optimizedRoute.isNotEmpty) {
       // Show all locations and full route
       for (int i = 0; i < widget.trip.optimizedRoute.length; i++) {
         final location = widget.trip.optimizedRoute[i];
-        markers.add(Marker(
-          markerId: MarkerId(location.id),
-          position: LatLng(location.latitude, location.longitude),
-          infoWindow: InfoWindow(title: location.name),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            i == 0
-                ? BitmapDescriptor.hueGreen
-                : i == widget.trip.optimizedRoute.length - 1
-                    ? BitmapDescriptor.hueRed
-                    : BitmapDescriptor.hueAzure,
-          ),
+        final point = LatLng(location.latitude, location.longitude);
+        routePoints.add(point);
+
+        markers.add(_createMarker(
+          point,
+          location.name,
+          i == 0
+              ? Colors.green
+              : i == widget.trip.optimizedRoute.length - 1
+                  ? Colors.red
+                  : AppTheme.primaryColor,
+          i == 0
+              ? Icons.play_arrow
+              : i == widget.trip.optimizedRoute.length - 1
+                  ? Icons.flag
+                  : Icons.circle,
+          isNumbered: i > 0 && i < widget.trip.optimizedRoute.length - 1,
+          number: i,
         ));
       }
 
-      // Add route polyline
+      // Add route polylines from segments if available
+      bool hasRouteData = false;
       for (var segment in widget.trip.routeSegments) {
         if (segment.polylinePoints.isNotEmpty) {
+          hasRouteData = true;
           polylines.add(Polyline(
-            polylineId: PolylineId('${segment.start.id}_${segment.end.id}'),
             points: segment.polylinePoints
                 .map((p) => LatLng(p.latitude, p.longitude))
                 .toList(),
             color: AppTheme.primaryColor,
-            width: 4,
+            strokeWidth: 4,
           ));
         }
+      }
+
+      // If no route data, draw straight lines between locations
+      if (!hasRouteData && routePoints.length > 1) {
+        polylines.add(Polyline(
+          points: routePoints,
+          color: AppTheme.primaryColor.withOpacity(0.7),
+          strokeWidth: 3,
+          isDotted: true,
+        ));
       }
     } else if (widget.dayPlan != null) {
       // Show only day's route
       final day = widget.dayPlan!;
+      final dayRoutePoints = <LatLng>[];
 
-      markers.add(Marker(
-        markerId: MarkerId('start_${day.dayNumber}'),
-        position: LatLng(day.startLocation.latitude, day.startLocation.longitude),
-        infoWindow: InfoWindow(title: 'Start: ${day.startLocation.name}'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-      ));
+      final startPoint = LatLng(day.startLocation.latitude, day.startLocation.longitude);
+      final endPoint = LatLng(day.endLocation.latitude, day.endLocation.longitude);
 
-      markers.add(Marker(
-        markerId: MarkerId('end_${day.dayNumber}'),
-        position: LatLng(day.endLocation.latitude, day.endLocation.longitude),
-        infoWindow: InfoWindow(title: 'End: ${day.endLocation.name}'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      dayRoutePoints.add(startPoint);
+
+      markers.add(_createMarker(
+        startPoint,
+        'Start: ${day.startLocation.name}',
+        Colors.green,
+        Icons.play_arrow,
       ));
 
       // Add stop markers
       for (var stop in day.stops) {
+        final stopPoint = LatLng(stop.location.latitude, stop.location.longitude);
+        dayRoutePoints.add(stopPoint);
+
         if (stop.type != StopType.destination) {
-          markers.add(Marker(
-            markerId: MarkerId(stop.location.id),
-            position: LatLng(stop.location.latitude, stop.location.longitude),
-            infoWindow: InfoWindow(title: stop.location.name),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              _getMarkerHue(stop.type),
-            ),
+          markers.add(_createMarker(
+            stopPoint,
+            stop.location.name,
+            _getStopColor(stop.type),
+            _getStopIcon(stop.type),
           ));
         }
+      }
+
+      dayRoutePoints.add(endPoint);
+
+      markers.add(_createMarker(
+        endPoint,
+        'End: ${day.endLocation.name}',
+        Colors.red,
+        Icons.flag,
+      ));
+
+      // Draw dotted line connecting all points
+      if (dayRoutePoints.length > 1) {
+        polylines.add(Polyline(
+          points: dayRoutePoints,
+          color: AppTheme.primaryColor.withOpacity(0.7),
+          strokeWidth: 3,
+          isDotted: true,
+        ));
       }
     }
 
@@ -115,79 +156,180 @@ class _RouteMapWidgetState extends State<RouteMapWidget> {
       _polylines = polylines;
     });
 
-    // Fit bounds to show all markers
-    _fitBounds();
+    // Fit bounds after map is ready
+    if (_mapReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+    }
   }
 
-  double _getMarkerHue(StopType type) {
+  Marker _createMarker(
+    LatLng position,
+    String title,
+    Color color,
+    IconData icon, {
+    bool isNumbered = false,
+    int number = 0,
+  }) {
+    return Marker(
+      point: position,
+      width: 36,
+      height: 36,
+      child: GestureDetector(
+        onTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(title), duration: const Duration(seconds: 1)),
+          );
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Center(
+            child: isNumbered
+                ? Text(
+                    '$number',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : Icon(icon, color: Colors.white, size: 18),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getStopColor(StopType type) {
     switch (type) {
       case StopType.fuelStop:
-        return BitmapDescriptor.hueOrange;
+        return Colors.orange;
       case StopType.mealBreak:
-        return BitmapDescriptor.hueYellow;
+        return Colors.amber;
       case StopType.teaBreak:
-        return BitmapDescriptor.hueCyan;
+        return Colors.cyan;
       case StopType.overnight:
-        return BitmapDescriptor.hueViolet;
+        return Colors.purple;
       default:
-        return BitmapDescriptor.hueAzure;
+        return AppTheme.primaryColor;
+    }
+  }
+
+  IconData _getStopIcon(StopType type) {
+    switch (type) {
+      case StopType.fuelStop:
+        return Icons.local_gas_station;
+      case StopType.mealBreak:
+        return Icons.restaurant;
+      case StopType.teaBreak:
+        return Icons.coffee;
+      case StopType.overnight:
+        return Icons.hotel;
+      default:
+        return Icons.location_on;
     }
   }
 
   void _fitBounds() {
-    if (_mapController == null || _markers.isEmpty) return;
+    if (_markers.isEmpty || !_mapReady) return;
 
-    double minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    try {
+      double minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
 
-    for (var marker in _markers) {
-      if (marker.position.latitude < minLat) minLat = marker.position.latitude;
-      if (marker.position.latitude > maxLat) maxLat = marker.position.latitude;
-      if (marker.position.longitude < minLng) minLng = marker.position.longitude;
-      if (marker.position.longitude > maxLng) maxLng = marker.position.longitude;
+      for (var marker in _markers) {
+        if (marker.point.latitude < minLat) minLat = marker.point.latitude;
+        if (marker.point.latitude > maxLat) maxLat = marker.point.latitude;
+        if (marker.point.longitude < minLng) minLng = marker.point.longitude;
+        if (marker.point.longitude > maxLng) maxLng = marker.point.longitude;
+      }
+
+      // Add padding
+      final latPadding = (maxLat - minLat) * 0.15;
+      final lngPadding = (maxLng - minLng) * 0.15;
+
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds(
+            LatLng(minLat - latPadding, minLng - lngPadding),
+            LatLng(maxLat + latPadding, maxLng + lngPadding),
+          ),
+          padding: const EdgeInsets.all(30),
+        ),
+      );
+    } catch (e) {
+      print('Fit bounds error: $e');
     }
-
-    final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 50),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     // Calculate initial camera position
     LatLng initialPosition;
+    double initialZoom = 6;
+
     if (widget.showFullRoute && widget.trip.optimizedRoute.isNotEmpty) {
-      final first = widget.trip.optimizedRoute.first;
-      initialPosition = LatLng(first.latitude, first.longitude);
+      // Center on midpoint of route
+      double avgLat = 0, avgLng = 0;
+      for (var loc in widget.trip.optimizedRoute) {
+        avgLat += loc.latitude;
+        avgLng += loc.longitude;
+      }
+      avgLat /= widget.trip.optimizedRoute.length;
+      avgLng /= widget.trip.optimizedRoute.length;
+      initialPosition = LatLng(avgLat, avgLng);
     } else if (widget.dayPlan != null) {
       initialPosition = LatLng(
-        widget.dayPlan!.startLocation.latitude,
-        widget.dayPlan!.startLocation.longitude,
+        (widget.dayPlan!.startLocation.latitude + widget.dayPlan!.endLocation.latitude) / 2,
+        (widget.dayPlan!.startLocation.longitude + widget.dayPlan!.endLocation.longitude) / 2,
       );
     } else {
       // Default to India center
-      initialPosition = const LatLng(20.5937, 78.9629);
+      initialPosition = LatLng(20.5937, 78.9629);
+      initialZoom = 5;
     }
 
-    return GoogleMap(
-      initialCameraPosition: CameraPosition(
-        target: initialPosition,
-        zoom: 10,
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: initialPosition,
+        initialZoom: initialZoom,
+        minZoom: 3,
+        maxZoom: 18,
+        onMapReady: () {
+          _mapReady = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+        },
       ),
-      onMapCreated: (controller) {
-        _mapController = controller;
-        _fitBounds();
-      },
-      markers: _markers,
-      polylines: _polylines,
-      myLocationEnabled: true,
-      myLocationButtonEnabled: true,
-      zoomControlsEnabled: false,
-      mapToolbarEnabled: false,
+      children: [
+        // OpenStreetMap tile layer - using HTTPS with CORS-friendly headers
+        TileLayer(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c'],
+          userAgentPackageName: 'com.yatraplanner.app',
+          maxZoom: 19,
+          tileProvider: NetworkTileProvider(),
+        ),
+        // Route polylines
+        if (_polylines.isNotEmpty)
+          PolylineLayer(polylines: _polylines),
+        // Markers
+        if (_markers.isNotEmpty)
+          MarkerLayer(markers: _markers),
+        // Attribution (small, bottom left)
+        const SimpleAttributionWidget(
+          source: Text('OpenStreetMap'),
+        ),
+      ],
     );
   }
 }

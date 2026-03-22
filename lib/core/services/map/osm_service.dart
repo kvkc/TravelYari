@@ -9,19 +9,25 @@ import 'map_service_interface.dart';
 class OsmService implements MapServiceInterface {
   final Dio _dio;
 
-  // Free public OSRM server (has rate limits, but works for personal use)
-  static const String _osrmBaseUrl = 'https://router.project-osrm.org';
-  // Nominatim for geocoding (free, CORS-enabled)
-  static const String _nominatimBaseUrl = 'https://nominatim.openstreetmap.org';
-  // Photon for autocomplete (free, fast, CORS-enabled)
-  static const String _photonBaseUrl = 'https://photon.komoot.io';
+  // Base URLs without proxy - proxy added per-request on web
+  static const String _osrmBase = 'https://router.project-osrm.org';
+  static const String _nominatimBase = 'https://nominatim.openstreetmap.org';
+  static const String _photonBase = 'https://photon.komoot.io';
+
+  // Get URL with CORS proxy for web
+  static String _proxyUrl(String url) {
+    if (kIsWeb) {
+      return 'https://api.allorigins.win/raw?url=${Uri.encodeComponent(url)}';
+    }
+    return url;
+  }
 
   OsmService() : _dio = Dio() {
     _dio.options.headers['User-Agent'] = 'YatraPlanner/1.0 (travel planning app)';
     _dio.options.headers['Accept'] = 'application/json';
     // Add timeout for better UX
-    _dio.options.connectTimeout = const Duration(seconds: 10);
-    _dio.options.receiveTimeout = const Duration(seconds: 10);
+    _dio.options.connectTimeout = const Duration(seconds: 15);
+    _dio.options.receiveTimeout = const Duration(seconds: 15);
   }
 
   @override
@@ -29,48 +35,80 @@ class OsmService implements MapServiceInterface {
 
   @override
   Future<List<TripLocation>> searchPlaces(String query, {LatLng? nearLocation}) async {
+    // Try Photon first
     try {
-      final params = <String, dynamic>{
-        'q': query,
-        'format': 'json',
-        'limit': 10,
-        'addressdetails': 1,
-      };
-
+      var url = '$_photonBase/api/?q=${Uri.encodeComponent(query)}&limit=10';
       if (nearLocation != null) {
-        params['viewbox'] = '${nearLocation.longitude - 1},${nearLocation.latitude + 1},${nearLocation.longitude + 1},${nearLocation.latitude - 1}';
-        params['bounded'] = 0;
+        url += '&lat=${nearLocation.latitude}&lon=${nearLocation.longitude}';
       }
 
-      final response = await _dio.get(
-        '$_nominatimBaseUrl/search',
-        queryParameters: params,
-      );
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
-        final List<dynamic> results = response.data;
+        final data = response.data is String ?
+            (await _dio.get(_proxyUrl(url))).data : response.data;
+        final features = data['features'] as List?;
+        if (features != null && features.isNotEmpty) {
+          return features.map((f) => _parsePhotonToLocation(f)).toList();
+        }
+      }
+    } catch (e) {
+      print('Photon search failed: $e');
+    }
+
+    // Fallback to Nominatim
+    try {
+      var url = '$_nominatimBase/search?q=${Uri.encodeComponent(query)}&format=json&limit=10&addressdetails=1';
+      if (nearLocation != null) {
+        url += '&viewbox=${nearLocation.longitude - 1},${nearLocation.latitude + 1},${nearLocation.longitude + 1},${nearLocation.latitude - 1}&bounded=0';
+      }
+
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> results = response.data is List ? response.data : [];
         return results.map((place) => _parseNominatimPlace(place)).toList();
       }
     } catch (e) {
-      print('OSM search failed: $e');
+      print('Nominatim search failed: $e');
     }
     return [];
+  }
+
+  TripLocation _parsePhotonToLocation(Map<String, dynamic> feature) {
+    final props = feature['properties'] as Map<String, dynamic>;
+    final coords = feature['geometry']['coordinates'] as List;
+
+    final name = props['name'] ?? props['city'] ?? props['county'] ?? 'Unknown';
+    final city = props['city'] ?? props['town'] ?? props['village'] ?? '';
+    final state = props['state'] ?? '';
+    final country = props['country'] ?? '';
+    final address = [city, state, country].where((s) => s.isNotEmpty).join(', ');
+
+    final osmType = props['osm_type']?.toString().substring(0, 1).toUpperCase() ?? 'N';
+    final osmId = props['osm_id']?.toString() ?? '';
+
+    return TripLocation(
+      name: name,
+      address: address.isNotEmpty ? address : null,
+      latitude: (coords[1] as num).toDouble(),
+      longitude: (coords[0] as num).toDouble(),
+      placeId: '$osmType$osmId',
+      source: LocationSource.openStreetMap,
+    );
   }
 
   @override
   Future<TripLocation?> getPlaceDetails(String placeId) async {
     try {
       // placeId format: "osm_type/osm_id" e.g., "N123456" or "W789"
-      final response = await _dio.get(
-        '$_nominatimBaseUrl/lookup',
-        queryParameters: {
-          'osm_ids': placeId,
-          'format': 'json',
-          'addressdetails': 1,
-        },
-      );
+      final url = '$_nominatimBase/lookup?osm_ids=$placeId&format=json&addressdetails=1';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 5));
 
-      if (response.statusCode == 200 && response.data.isNotEmpty) {
+      if (response.statusCode == 200 && response.data is List && response.data.isNotEmpty) {
         return _parseNominatimPlace(response.data[0]);
       }
     } catch (e) {
@@ -81,22 +119,55 @@ class OsmService implements MapServiceInterface {
 
   @override
   Future<TripLocation?> reverseGeocode(double latitude, double longitude) async {
+    // Try Photon first
     try {
-      final response = await _dio.get(
-        '$_nominatimBaseUrl/reverse',
-        queryParameters: {
-          'lat': latitude,
-          'lon': longitude,
-          'format': 'json',
-          'addressdetails': 1,
-        },
-      );
+      final url = '$_photonBase/reverse?lat=$latitude&lon=$longitude&limit=1';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 5));
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && response.data != null) {
+        final features = response.data['features'] as List?;
+        if (features != null && features.isNotEmpty) {
+          final props = features[0]['properties'] as Map<String, dynamic>;
+          final coords = features[0]['geometry']['coordinates'] as List;
+
+          final name = props['name'] ??
+              props['city'] ??
+              props['town'] ??
+              props['village'] ??
+              props['county'] ??
+              props['state'] ??
+              'Unknown location';
+
+          final city = props['city'] ?? props['town'] ?? props['village'] ?? '';
+          final state = props['state'] ?? '';
+          final country = props['country'] ?? '';
+          final address = [city, state, country].where((s) => s.isNotEmpty).join(', ');
+
+          return TripLocation(
+            name: name,
+            address: address.isNotEmpty ? address : null,
+            latitude: (coords[1] as num).toDouble(),
+            longitude: (coords[0] as num).toDouble(),
+            source: LocationSource.openStreetMap,
+          );
+        }
+      }
+    } catch (e) {
+      print('Photon reverse geocode failed: $e');
+    }
+
+    // Fallback to Nominatim
+    try {
+      final url = '$_nominatimBase/reverse?lat=$latitude&lon=$longitude&format=json&addressdetails=1';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200 && response.data != null) {
         return _parseNominatimPlace(response.data);
       }
     } catch (e) {
-      print('OSM reverse geocode failed: $e');
+      print('Nominatim reverse geocode failed: $e');
     }
     return null;
   }
@@ -116,14 +187,9 @@ class OsmService implements MapServiceInterface {
         '${destination.longitude},${destination.latitude}',
       ].join(';');
 
-      final response = await _dio.get(
-        '$_osrmBaseUrl/route/v1/driving/$coords',
-        queryParameters: {
-          'overview': 'full',
-          'geometries': 'polyline',
-          'steps': 'true',
-        },
-      );
+      final url = '$_osrmBase/route/v1/driving/$coords?overview=full&geometries=polyline&steps=true';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 && response.data['code'] == 'Ok') {
         final route = response.data['routes'][0];
@@ -160,13 +226,9 @@ class OsmService implements MapServiceInterface {
         (i) => i + origins.length,
       ).join(';');
 
-      final response = await _dio.get(
-        '$_osrmBaseUrl/table/v1/driving/$coords',
-        queryParameters: {
-          'sources': sourceIndices,
-          'destinations': destIndices,
-        },
-      );
+      final url = '$_osrmBase/table/v1/driving/$coords?sources=$sourceIndices&destinations=$destIndices';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 && response.data['code'] == 'Ok') {
         final durations = response.data['durations'] as List;
@@ -198,28 +260,44 @@ class OsmService implements MapServiceInterface {
     required String type,
     int radiusMeters = 5000,
   }) async {
+    // Convert type to OSM amenity
+    final osmType = _convertToOsmType(type);
+
+    // Try Nominatim first
     try {
-      // Convert type to OSM amenity
-      final osmType = _convertToOsmType(type);
+      final viewbox = '${longitude - 0.1},${latitude + 0.1},${longitude + 0.1},${latitude - 0.1}';
+      final url = '$_nominatimBase/search?q=${Uri.encodeComponent(osmType)}&format=json&limit=10&addressdetails=1&viewbox=$viewbox&bounded=1';
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 8));
 
-      // Use Overpass API for nearby search (free) - compact query format
-      final query = '[out:json][timeout:10];'
-          '(node["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude);'
-          'way["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude););'
-          'out center 20;';
+      if (response.statusCode == 200) {
+        final results = response.data as List? ?? [];
+        if (results.isNotEmpty) {
+          return results.map((place) => _parseNominatimPlace(place)).toList();
+        }
+      }
+    } catch (e) {
+      print('Nominatim nearby search failed: $e');
+    }
 
-      final response = await _dio.get(
-        'https://overpass-api.de/api/interpreter',
-        queryParameters: {'data': query},
-      );
+    // Fallback to Overpass API
+    try {
+      final query = '[out:json][timeout:5];'
+          '(node["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude););'
+          'out 10;';
+
+      final overpassUrl = 'https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(query)}';
+      final response = await _dio.get(_proxyUrl(overpassUrl))
+          .timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
         final elements = response.data['elements'] as List? ?? [];
         return elements.map((e) => _parseOverpassElement(e)).toList();
       }
     } catch (e) {
-      print('OSM nearby search failed: $e');
+      print('Overpass nearby search failed: $e');
     }
+
     return [];
   }
 
@@ -229,25 +307,18 @@ class OsmService implements MapServiceInterface {
     LatLng? location,
     int radiusMeters = 50000,
   }) async {
-    // Try Photon first (faster), then fallback to Nominatim
+    // Try Photon first (faster)
     try {
-      final params = <String, dynamic>{
-        'q': input,
-        'limit': 10,
-      };
-
+      var url = '$_photonBase/api/?q=${Uri.encodeComponent(input)}&limit=10';
       if (location != null) {
-        params['lat'] = location.latitude;
-        params['lon'] = location.longitude;
+        url += '&lat=${location.latitude}&lon=${location.longitude}';
       }
 
-      final response = await _dio.get(
-        '$_photonBaseUrl/api/',
-        queryParameters: params,
-      );
+      final response = await _dio.get(_proxyUrl(url))
+          .timeout(const Duration(seconds: 8));
 
-      if (response.statusCode == 200) {
-        final features = response.data['features'] as List;
+      if (response.statusCode == 200 && response.data != null) {
+        final features = response.data['features'] as List? ?? [];
         if (features.isNotEmpty) {
           return features.map((f) => _parsePhotonFeature(f)).toList();
         }
@@ -256,7 +327,7 @@ class OsmService implements MapServiceInterface {
       print('Photon autocomplete failed: $e, trying Nominatim...');
     }
 
-    // Fallback to Nominatim search (more reliable, CORS-friendly)
+    // Fallback to Nominatim search
     try {
       final searchResults = await searchPlaces(input, nearLocation: location);
       return searchResults.map((loc) => PlacePrediction(

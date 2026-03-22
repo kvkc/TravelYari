@@ -11,10 +11,13 @@ class AmenitiesService {
   final UnifiedMapService _mapService;
   final Dio _dio;
 
+  /// Timeout for individual amenity lookups (2 seconds)
+  static const Duration _timeout = Duration(seconds: 2);
+
   AmenitiesService(this._mapService)
       : _dio = Dio(BaseOptions(
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
         ));
 
   /// Find petrol stations along a route
@@ -95,6 +98,7 @@ class AmenitiesService {
   }
 
   /// Find hotels/stays with minimum rating and proximity to towns
+  /// Uses timeout to prevent hanging
   Future<List<Amenity>> findStayOptions({
     required LatLng location,
     double minRating = 3.5,
@@ -102,17 +106,20 @@ class AmenitiesService {
     int maxResults = 10,
     bool preferGoodWashrooms = true,
   }) async {
-    final places = await _mapService.searchNearby(
-      location.latitude,
-      location.longitude,
-      type: 'lodging',
-      radiusMeters: (searchRadiusKm * 1000).round(),
-    );
+    try {
+      final places = await _mapService.searchNearby(
+        location.latitude,
+        location.longitude,
+        type: 'lodging',
+        radiusMeters: (searchRadiusKm * 1000).round(),
+      ).timeout(_timeout, onTimeout: () => <TripLocation>[]);
 
-    List<Amenity> amenities = [];
-    for (var place in places) {
-      final amenity = await _enrichAmenityData(
-        Amenity(
+      if (places.isEmpty) return [];
+
+      List<Amenity> amenities = [];
+      for (var place in places.take(maxResults * 2)) {
+        // Skip enrichment to save time - use basic data
+        final amenity = Amenity(
           name: place.name,
           address: place.address,
           latitude: place.latitude,
@@ -120,28 +127,37 @@ class AmenitiesService {
           type: AmenityType.hotel,
           rating: place.metadata?['rating']?.toDouble(),
           reviewCount: place.metadata?['user_ratings_total'],
-          source: 'google',
+          source: 'osm',
           placeId: place.placeId,
-        ),
-      );
-      amenities.add(amenity);
-    }
-
-    // Filter and sort
-    var filtered = amenities.where((a) => (a.rating ?? 0) >= minRating).toList();
-
-    filtered.sort((a, b) {
-      if (preferGoodWashrooms) {
-        if (a.hasGoodWashroom && !b.hasGoodWashroom) return -1;
-        if (!a.hasGoodWashroom && b.hasGoodWashroom) return 1;
+        );
+        amenities.add(amenity);
       }
-      return (b.rating ?? 0).compareTo(a.rating ?? 0);
-    });
 
-    return filtered.take(maxResults).toList();
+      // Filter and sort
+      var filtered = amenities.where((a) => (a.rating ?? 0) >= minRating).toList();
+
+      // If no places meet the rating criteria, return what we have
+      if (filtered.isEmpty && amenities.isNotEmpty) {
+        filtered = amenities;
+      }
+
+      filtered.sort((a, b) {
+        if (preferGoodWashrooms) {
+          if (a.hasGoodWashroom && !b.hasGoodWashroom) return -1;
+          if (!a.hasGoodWashroom && b.hasGoodWashroom) return 1;
+        }
+        return (b.rating ?? 0).compareTo(a.rating ?? 0);
+      });
+
+      return filtered.take(maxResults).toList();
+    } catch (e) {
+      print('Find stay options failed: $e');
+      return [];
+    }
   }
 
   /// Find amenities along a route at regular intervals
+  /// Uses short timeouts and limits to prevent hanging
   Future<List<Amenity>> _findAlongRoute({
     required List<LatLng> routePoints,
     required String type,
@@ -149,52 +165,72 @@ class AmenitiesService {
     double searchRadiusKm = 2.0,
     int maxResults = 20,
   }) async {
-    // Sample points along the route at regular intervals
-    List<LatLng> samplePoints = _sampleRoutePoints(routePoints, intervalKm: 50);
+    // Sample fewer points to reduce API calls (every 100km instead of 50km)
+    List<LatLng> samplePoints = _sampleRoutePoints(routePoints, intervalKm: 100);
+
+    // Limit to max 3 sample points to prevent too many API calls
+    if (samplePoints.length > 3) {
+      final interval = samplePoints.length ~/ 3;
+      samplePoints = [
+        samplePoints.first,
+        samplePoints[samplePoints.length ~/ 2],
+        samplePoints.last,
+      ];
+    }
 
     Set<String> seenPlaceIds = {};
     List<Amenity> allAmenities = [];
 
     for (var point in samplePoints) {
-      final places = await _mapService.searchNearby(
-        point.latitude,
-        point.longitude,
-        type: type,
-        radiusMeters: (searchRadiusKm * 1000).round(),
-      );
+      try {
+        final places = await _mapService.searchNearby(
+          point.latitude,
+          point.longitude,
+          type: type,
+          radiusMeters: (searchRadiusKm * 1000).round(),
+        ).timeout(_timeout, onTimeout: () => <TripLocation>[]);
 
-      for (var place in places) {
-        // Deduplicate
-        final key = place.placeId ?? '${place.latitude}_${place.longitude}';
-        if (seenPlaceIds.contains(key)) continue;
-        seenPlaceIds.add(key);
+        for (var place in places) {
+          // Deduplicate
+          final key = place.placeId ?? '${place.latitude}_${place.longitude}';
+          if (seenPlaceIds.contains(key)) continue;
+          seenPlaceIds.add(key);
 
-        // Calculate distance from route
-        double minDistance = double.infinity;
-        for (var routePoint in routePoints) {
-          final dist = _haversineDistance(
-            place.latitude,
-            place.longitude,
-            routePoint.latitude,
-            routePoint.longitude,
+          // Calculate distance from route (use subset of points for speed)
+          double minDistance = double.infinity;
+          final step = (routePoints.length / 10).ceil().clamp(1, routePoints.length);
+          for (int i = 0; i < routePoints.length; i += step) {
+            final routePoint = routePoints[i];
+            final dist = _haversineDistance(
+              place.latitude,
+              place.longitude,
+              routePoint.latitude,
+              routePoint.longitude,
+            );
+            if (dist < minDistance) minDistance = dist;
+          }
+
+          final amenity = Amenity(
+            name: place.name,
+            address: place.address,
+            latitude: place.latitude,
+            longitude: place.longitude,
+            type: amenityType,
+            rating: place.metadata?['rating']?.toDouble(),
+            reviewCount: place.metadata?['user_ratings_total'],
+            source: 'osm',
+            placeId: place.placeId,
+            distanceFromRoute: minDistance,
           );
-          if (dist < minDistance) minDistance = dist;
+
+          allAmenities.add(amenity);
         }
 
-        final amenity = Amenity(
-          name: place.name,
-          address: place.address,
-          latitude: place.latitude,
-          longitude: place.longitude,
-          type: amenityType,
-          rating: place.metadata?['rating']?.toDouble(),
-          reviewCount: place.metadata?['user_ratings_total'],
-          source: 'google',
-          placeId: place.placeId,
-          distanceFromRoute: minDistance,
-        );
-
-        allAmenities.add(amenity);
+        // Early exit if we have enough results
+        if (allAmenities.length >= maxResults) break;
+      } catch (e) {
+        print('Amenity search failed for point: $e');
+        continue;
       }
     }
 

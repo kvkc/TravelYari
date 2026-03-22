@@ -147,10 +147,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     switch (provider) {
       case MapProvider.google:
         return 'Google Maps';
-      case MapProvider.mappls:
-        return 'Mappls (MapMyIndia)';
-      case MapProvider.bhuvan:
-        return 'Bhuvan (ISRO)';
       case MapProvider.openStreetMap:
         return 'OpenStreetMap (Free)';
     }

@@ -8,7 +8,7 @@ class RouteSegment {
   final int durationMinutes;
   final List<LatLng> polylinePoints;
   final List<Amenity> suggestedStops;
-  final String? routeProvider; // google, mappls, bhuvan
+  final String? routeProvider; // google, openStreetMap, estimated
 
   RouteSegment({
     required this.start,

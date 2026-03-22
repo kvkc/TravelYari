@@ -3,40 +3,50 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../features/trip_planning/models/location.dart';
 import '../../../features/trip_planning/models/route_segment.dart';
 import '../api_keys.dart';
-import '../api_key_storage.dart';
 import 'map_service_interface.dart';
 import 'google_maps_service.dart';
-import 'mappls_service.dart';
-import 'bhuvan_service.dart';
 import 'osm_service.dart';
 
 enum MapProvider {
   google,
-  mappls,
-  bhuvan,
   openStreetMap, // Free fallback, no API key needed
 }
 
-/// Unified map service that can switch between providers
-/// and fallback to other providers if one fails.
-/// OpenStreetMap is always available as the final fallback (no API key needed).
+/// Unified map service that uses OSM (free) by default
+/// and optionally Google Maps if API key is configured.
 class UnifiedMapService {
+  /// Timeout for individual service calls (3 seconds)
+  static const Duration _serviceTimeout = Duration(seconds: 3);
+
+  /// Helper to wrap service calls with timeout
+  Future<T?> _withTimeout<T>(Future<T?> Function() fn) async {
+    try {
+      return await fn().timeout(_serviceTimeout, onTimeout: () => null);
+    } catch (e) {
+      return null;
+    }
+  }
+
   final GoogleMapsService _googleService;
-  final MapplsService _mapplsService;
-  final BhuvanService _bhuvanService;
   final OsmService _osmService;
 
   MapProvider _primaryProvider;
 
+  /// Check if an API key is actually configured (not placeholder)
+  static bool _isKeyConfigured(String key) {
+    return key.isNotEmpty &&
+           !key.startsWith('YOUR_') &&
+           key != 'YOUR_GOOGLE_MAPS_API_KEY';
+  }
+
+  /// Check if Google Maps has valid API key
+  static bool get hasGoogleKey => _isKeyConfigured(ApiKeys.googleMaps);
+
   UnifiedMapService({
     required GoogleMapsService googleService,
-    required MapplsService mapplsService,
-    required BhuvanService bhuvanService,
     required OsmService osmService,
-    MapProvider primaryProvider = MapProvider.google,
+    MapProvider primaryProvider = MapProvider.openStreetMap,
   })  : _googleService = googleService,
-        _mapplsService = mapplsService,
-        _bhuvanService = bhuvanService,
         _osmService = osmService,
         _primaryProvider = primaryProvider;
 
@@ -46,45 +56,49 @@ class UnifiedMapService {
     _primaryProvider = provider;
   }
 
-  MapServiceInterface get _primary {
-    switch (_primaryProvider) {
-      case MapProvider.google:
-        return _googleService;
-      case MapProvider.mappls:
-        return _mapplsService;
-      case MapProvider.bhuvan:
-        return _bhuvanService;
-      case MapProvider.openStreetMap:
-        return _osmService;
-    }
+  /// Get list of services that have valid API keys configured
+  /// OSM is always first (free, always works)
+  List<MapServiceInterface> get _availableServices {
+    final services = <MapServiceInterface>[_osmService];
+    if (hasGoogleKey) services.add(_googleService);
+    return services;
   }
 
-  List<MapServiceInterface> get _fallbackOrder {
-    // Return services in fallback order based on primary
-    // OSM is always the last fallback since it's free and always available
-    switch (_primaryProvider) {
-      case MapProvider.google:
-        return [_googleService, _mapplsService, _bhuvanService, _osmService];
-      case MapProvider.mappls:
-        return [_mapplsService, _googleService, _bhuvanService, _osmService];
-      case MapProvider.bhuvan:
-        return [_bhuvanService, _googleService, _mapplsService, _osmService];
-      case MapProvider.openStreetMap:
-        return [_osmService, _googleService, _mapplsService, _bhuvanService];
+  /// Search places - uses OSM by default, Google if configured
+  Future<List<TripLocation>> searchPlaces(
+    String query, {
+    LatLng? nearLocation,
+    MapProvider? provider,
+  }) async {
+    final services = provider != null
+        ? [_getService(provider)]
+        : _availableServices;
+
+    for (var service in services) {
+      try {
+        final results = await service.searchPlaces(query, nearLocation: nearLocation)
+            .timeout(_serviceTimeout, onTimeout: () => <TripLocation>[]);
+        if (results.isNotEmpty) return results;
+      } catch (e) {
+        print('${service.providerName} search failed: $e');
+        continue;
+      }
     }
+
+    return [];
   }
 
-  /// Search places across all providers and merge results
+  /// Search places across all available providers and merge results
   Future<List<TripLocation>> searchPlacesAllProviders(
     String query, {
     LatLng? nearLocation,
   }) async {
-    final results = await Future.wait([
-      _googleService.searchPlaces(query, nearLocation: nearLocation),
-      _mapplsService.searchPlaces(query, nearLocation: nearLocation),
-      _bhuvanService.searchPlaces(query, nearLocation: nearLocation),
-      _osmService.searchPlaces(query, nearLocation: nearLocation),
-    ]);
+    final futures = _availableServices.map((service) =>
+      service.searchPlaces(query, nearLocation: nearLocation)
+          .timeout(_serviceTimeout, onTimeout: () => <TripLocation>[])
+    );
+
+    final results = await Future.wait(futures);
 
     // Merge and deduplicate results
     final allResults = <TripLocation>[];
@@ -92,7 +106,6 @@ class UnifiedMapService {
 
     for (var providerResults in results) {
       for (var location in providerResults) {
-        // Create a key based on approximate coordinates
         final key = '${(location.latitude * 1000).round()}_${(location.longitude * 1000).round()}';
         if (!seen.contains(key)) {
           seen.add(key);
@@ -104,38 +117,16 @@ class UnifiedMapService {
     return allResults;
   }
 
-  /// Search with primary provider and fallback
-  Future<List<TripLocation>> searchPlaces(
-    String query, {
-    LatLng? nearLocation,
-    MapProvider? provider,
-  }) async {
-    final services = provider != null
-        ? [_getService(provider)]
-        : _fallbackOrder;
-
-    for (var service in services) {
-      try {
-        final results = await service.searchPlaces(query, nearLocation: nearLocation);
-        if (results.isNotEmpty) return results;
-      } catch (e) {
-        print('${service.providerName} search failed: $e');
-        continue;
-      }
-    }
-
-    return [];
-  }
-
   Future<TripLocation?> getPlaceDetails(String placeId, LocationSource source) async {
     final service = _getServiceBySource(source);
     return service.getPlaceDetails(placeId);
   }
 
   Future<TripLocation?> reverseGeocode(double latitude, double longitude) async {
-    for (var service in _fallbackOrder) {
+    for (var service in _availableServices) {
       try {
-        final result = await service.reverseGeocode(latitude, longitude);
+        final result = await service.reverseGeocode(latitude, longitude)
+            .timeout(_serviceTimeout, onTimeout: () => null);
         if (result != null) return result;
       } catch (e) {
         continue;
@@ -150,24 +141,17 @@ class UnifiedMapService {
     List<TripLocation>? waypoints,
     MapProvider? provider,
   }) async {
-    // Bhuvan doesn't support routing, so exclude it for directions
-    // OSM (OSRM) is included as free fallback
     final services = provider != null
         ? [_getService(provider)]
-        : [_googleService, _mapplsService, _osmService];
+        : _availableServices;
 
     for (var service in services) {
-      try {
-        final result = await service.getDirections(
-          origin,
-          destination,
-          waypoints: waypoints,
-        );
-        if (result != null) return result;
-      } catch (e) {
-        print('${service.providerName} directions failed: $e');
-        continue;
-      }
+      final result = await _withTimeout(() => service.getDirections(
+        origin,
+        destination,
+        waypoints: waypoints,
+      ));
+      if (result != null) return result;
     }
 
     return null;
@@ -180,11 +164,12 @@ class UnifiedMapService {
   }) async {
     final services = provider != null
         ? [_getService(provider)]
-        : [_googleService, _mapplsService, _osmService];
+        : _availableServices;
 
     for (var service in services) {
       try {
-        final result = await service.getDistanceMatrix(origins, destinations);
+        final result = await service.getDistanceMatrix(origins, destinations)
+            .timeout(_serviceTimeout, onTimeout: () => <List<double>>[]);
         if (result.isNotEmpty) return result;
       } catch (e) {
         continue;
@@ -208,7 +193,7 @@ class UnifiedMapService {
   }) async {
     final services = provider != null
         ? [_getService(provider)]
-        : _fallbackOrder;
+        : _availableServices;
 
     for (var service in services) {
       try {
@@ -217,9 +202,10 @@ class UnifiedMapService {
           longitude,
           type: type,
           radiusMeters: radiusMeters,
-        );
+        ).timeout(_serviceTimeout, onTimeout: () => <TripLocation>[]);
         if (results.isNotEmpty) return results;
       } catch (e) {
+        print('${service.providerName} nearby search failed: $e');
         continue;
       }
     }
@@ -234,13 +220,15 @@ class UnifiedMapService {
   }) async {
     final services = provider != null
         ? [_getService(provider)]
-        : _fallbackOrder;
+        : _availableServices;
 
     for (var service in services) {
       try {
-        final results = await service.autocomplete(input, location: location);
+        final results = await service.autocomplete(input, location: location)
+            .timeout(_serviceTimeout, onTimeout: () => <PlacePrediction>[]);
         if (results.isNotEmpty) return results;
       } catch (e) {
+        print('${service.providerName} autocomplete failed: $e');
         continue;
       }
     }
@@ -252,10 +240,6 @@ class UnifiedMapService {
     switch (provider) {
       case MapProvider.google:
         return _googleService;
-      case MapProvider.mappls:
-        return _mapplsService;
-      case MapProvider.bhuvan:
-        return _bhuvanService;
       case MapProvider.openStreetMap:
         return _osmService;
     }
@@ -264,15 +248,11 @@ class UnifiedMapService {
   MapServiceInterface _getServiceBySource(LocationSource source) {
     switch (source) {
       case LocationSource.googleMaps:
-        return _googleService;
-      case LocationSource.mappls:
-        return _mapplsService;
-      case LocationSource.bhuvan:
-        return _bhuvanService;
+        return hasGoogleKey ? _googleService : _osmService;
       case LocationSource.openStreetMap:
         return _osmService;
       default:
-        return _primary;
+        return _osmService;
     }
   }
 }
@@ -284,39 +264,19 @@ final osmServiceProvider = Provider<OsmService>((ref) {
   return OsmService();
 });
 
-/// Google Maps Service - uses default keys (user keys loaded async when needed)
+/// Google Maps Service - only useful if API key configured
 final googleMapsServiceProvider = Provider<GoogleMapsService>((ref) {
   return GoogleMapsService(apiKey: ApiKeys.googleMaps);
 });
 
-/// Mappls Service
-final mapplsServiceProvider = Provider<MapplsService>((ref) {
-  return MapplsService(
-    apiKey: ApiKeys.mappls,
-    clientId: ApiKeys.mapplsClientId,
-    clientSecret: ApiKeys.mapplsClientSecret,
-  );
-});
-
-/// Bhuvan Service
-final bhuvanServiceProvider = Provider<BhuvanService>((ref) {
-  return BhuvanService(apiKey: ApiKeys.bhuvan);
-});
-
-/// Unified Map Service - combines all providers with OSM as free fallback
-/// Uses default API keys, falling back to OSM (free) when they fail
+/// Unified Map Service - uses OSM by default (free, always works)
 final unifiedMapServiceProvider = Provider<UnifiedMapService>((ref) {
   final googleService = ref.watch(googleMapsServiceProvider);
-  final mapplsService = ref.watch(mapplsServiceProvider);
-  final bhuvanService = ref.watch(bhuvanServiceProvider);
   final osmService = ref.watch(osmServiceProvider);
 
   return UnifiedMapService(
     googleService: googleService,
-    mapplsService: mapplsService,
-    bhuvanService: bhuvanService,
     osmService: osmService,
-    // Default to OSM since it's free and always works without API keys
     primaryProvider: MapProvider.openStreetMap,
   );
 });

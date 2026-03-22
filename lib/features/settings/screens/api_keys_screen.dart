@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,11 +14,6 @@ class ApiKeysScreen extends ConsumerStatefulWidget {
 
 class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
   final _googleMapsController = TextEditingController();
-  final _mapplsKeyController = TextEditingController();
-  final _mapplsClientIdController = TextEditingController();
-  final _mapplsSecretController = TextEditingController();
-  final _openRouteServiceController = TextEditingController();
-  final _foursquareController = TextEditingController();
 
   bool _isLoading = true;
   bool _obscureKeys = true;
@@ -32,19 +26,9 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
 
   Future<void> _loadKeys() async {
     final googleMaps = await ApiKeyStorage.getGoogleMapsKey();
-    final mappls = await ApiKeyStorage.getMapplsKey();
-    final mapplsClientId = await ApiKeyStorage.getMapplsClientId();
-    final mapplsSecret = await ApiKeyStorage.getMapplsClientSecret();
-    final openRouteService = await ApiKeyStorage.getOpenRouteServiceKey();
-    final foursquare = await ApiKeyStorage.getFoursquareKey();
 
     setState(() {
       _googleMapsController.text = googleMaps ?? '';
-      _mapplsKeyController.text = mappls ?? '';
-      _mapplsClientIdController.text = mapplsClientId ?? '';
-      _mapplsSecretController.text = mapplsSecret ?? '';
-      _openRouteServiceController.text = openRouteService ?? '';
-      _foursquareController.text = foursquare ?? '';
       _isLoading = false;
     });
   }
@@ -65,11 +49,6 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
   @override
   void dispose() {
     _googleMapsController.dispose();
-    _mapplsKeyController.dispose();
-    _mapplsClientIdController.dispose();
-    _mapplsSecretController.dispose();
-    _openRouteServiceController.dispose();
-    _foursquareController.dispose();
     super.dispose();
   }
 
@@ -94,7 +73,7 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
                 _buildInfoCard(),
                 const SizedBox(height: 24),
 
-                _buildSectionHeader('Google Maps', 'Best coverage worldwide'),
+                _buildSectionHeader('Google Maps (Optional)', 'For additional map features'),
                 _buildKeyField(
                   controller: _googleMapsController,
                   label: 'Google Maps API Key',
@@ -103,70 +82,6 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
                   onSave: (value) => _saveKey(
                     'Google Maps key',
                     ApiKeyStorage.setGoogleMapsKey,
-                    value,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                _buildSectionHeader('Mappls (MapMyIndia)', 'Best for India'),
-                _buildKeyField(
-                  controller: _mapplsKeyController,
-                  label: 'Mappls API Key',
-                  hint: 'Your Mappls API key',
-                  helpUrl: 'https://about.mappls.com/api/',
-                  onSave: (value) => _saveKey(
-                    'Mappls key',
-                    ApiKeyStorage.setMapplsKey,
-                    value,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildKeyField(
-                  controller: _mapplsClientIdController,
-                  label: 'Mappls Client ID',
-                  hint: 'Your client ID',
-                  onSave: (value) => _saveKey(
-                    'Mappls Client ID',
-                    ApiKeyStorage.setMapplsClientId,
-                    value,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildKeyField(
-                  controller: _mapplsSecretController,
-                  label: 'Mappls Client Secret',
-                  hint: 'Your client secret',
-                  onSave: (value) => _saveKey(
-                    'Mappls Client Secret',
-                    ApiKeyStorage.setMapplsClientSecret,
-                    value,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                _buildSectionHeader('OpenRouteService', 'Free with higher limits'),
-                _buildKeyField(
-                  controller: _openRouteServiceController,
-                  label: 'OpenRouteService API Key',
-                  hint: 'Your ORS key (optional)',
-                  helpUrl: 'https://openrouteservice.org/dev/#/signup',
-                  onSave: (value) => _saveKey(
-                    'OpenRouteService key',
-                    ApiKeyStorage.setOpenRouteServiceKey,
-                    value,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                _buildSectionHeader('Foursquare', 'For restaurant & POI data'),
-                _buildKeyField(
-                  controller: _foursquareController,
-                  label: 'Foursquare API Key',
-                  hint: 'fsq3...',
-                  helpUrl: 'https://location.foursquare.com/developer/',
-                  onSave: (value) => _saveKey(
-                    'Foursquare key',
-                    ApiKeyStorage.setFoursquareKey,
                     value,
                   ),
                 ),
@@ -189,10 +104,10 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.info_outline, color: AppTheme.primaryColor),
+                const Icon(Icons.check_circle, color: Colors.green),
                 const SizedBox(width: 8),
                 const Text(
-                  'Bring Your Own Keys',
+                  'No API Keys Required!',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 16,
@@ -202,13 +117,14 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'The app works without API keys using free OpenStreetMap data. '
-              'Add your own keys for better accuracy, higher limits, and premium features.',
+              'This app uses free OpenStreetMap data by default. '
+              'Everything works without any API keys!',
               style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Keys are stored securely on your device and never shared.',
+              'Optionally add a Google Maps key for additional features. '
+              'Keys are stored securely on your device.',
               style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
             ),
           ],
@@ -308,7 +224,7 @@ class _ApiKeysScreenState extends ConsumerState<ApiKeysScreen> {
         title: const Text('Clear All API Keys?'),
         content: const Text(
           'This will remove all stored API keys. '
-          'The app will fall back to free OpenStreetMap data.',
+          'The app will use free OpenStreetMap data.',
         ),
         actions: [
           TextButton(

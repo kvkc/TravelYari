@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../core/services/trip/trip_planner_service.dart';
+import '../../../core/services/map/unified_map_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../models/trip.dart';
 import '../models/location.dart';
@@ -28,13 +29,16 @@ class TripPlanningScreen extends ConsumerStatefulWidget {
 
 class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   late Trip _trip;
+  TripLocation? _startingPoint;
   bool _isLoading = false;
   bool _isPlanning = false;
+  bool _isLoadingLocation = false;
 
   @override
   void initState() {
     super.initState();
     _loadOrCreateTrip();
+    _initStartingPoint();
   }
 
   void _loadOrCreateTrip() {
@@ -42,6 +46,14 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
       final savedTrip = StorageService.getTrip(widget.tripId!);
       if (savedTrip != null) {
         _trip = savedTrip;
+        // Load starting point from trip if exists
+        if (_trip.locations.isNotEmpty) {
+          // Check if first location is marked as starting point
+          final first = _trip.locations.first;
+          if (first.metadata?['isStartingPoint'] == true) {
+            _startingPoint = first;
+          }
+        }
         return;
       }
     }
@@ -63,8 +75,80 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     }
   }
 
+  Future<void> _initStartingPoint() async {
+    if (_startingPoint != null) return;
+
+    setState(() => _isLoadingLocation = true);
+
+    try {
+      // Try to get current location
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        final requested = await Geolocator.requestPermission();
+        if (requested == LocationPermission.denied ||
+            requested == LocationPermission.deniedForever) {
+          setState(() => _isLoadingLocation = false);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => _isLoadingLocation = false);
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+      ).timeout(const Duration(seconds: 5), onTimeout: () {
+        throw Exception('Location timeout');
+      });
+
+      // Reverse geocode to get address
+      final mapService = ref.read(unifiedMapServiceProvider);
+      final location = await mapService.reverseGeocode(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (mounted) {
+        setState(() {
+          // Create starting point with unique name to distinguish from destinations
+          _startingPoint = TripLocation(
+            name: location?.name ?? 'My Location',
+            address: location?.address ?? '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}',
+            latitude: position.latitude,
+            longitude: position.longitude,
+            source: LocationSource.manual,
+            metadata: {'isStartingPoint': true},
+          );
+          _isLoadingLocation = false;
+        });
+      }
+    } catch (e) {
+      print('Failed to get current location: $e');
+      if (mounted) {
+        setState(() => _isLoadingLocation = false);
+      }
+    }
+  }
+
   Future<void> _saveTrip() async {
     await StorageService.saveTrip(_trip);
+  }
+
+  Future<void> _editStartingPoint() async {
+    final result = await Navigator.pushNamed(
+      context,
+      AppRouter.locationSearch,
+    );
+
+    if (result != null && result is TripLocation) {
+      setState(() {
+        _startingPoint = result.copyWith(
+          metadata: {...?result.metadata, 'isStartingPoint': true},
+        );
+      });
+    }
   }
 
   Future<void> _addLocation() async {
@@ -103,10 +187,8 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
       _trip = _trip.copyWith(locations: locations);
     });
     await _saveTrip();
-    // Don't auto-optimize on reorder - user is manually arranging
   }
 
-  /// Auto-optimize route if preference is enabled and enough locations
   Future<void> _autoOptimizeIfNeeded() async {
     if (!_trip.preferences.autoOptimize) return;
     if (_trip.locations.length < 2) return;
@@ -116,29 +198,46 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
 
     try {
       final plannerService = ref.read(tripPlannerServiceProvider);
+
+      // Include starting point in planning if set
+      final locationsToOptimize = _startingPoint != null
+          ? [_startingPoint!, ..._trip.locations]
+          : _trip.locations;
+
+      final tripToOptimize = _trip.copyWith(locations: locationsToOptimize);
+
       final plannedTrip = await plannerService.generateTripPlan(
-        trip: _trip,
+        trip: tripToOptimize,
         startDate: _trip.startDate ?? DateTime.now().add(const Duration(days: 1)),
       );
 
       setState(() {
-        _trip = plannedTrip;
+        _trip = plannedTrip.copyWith(
+          locations: _startingPoint != null
+              ? plannedTrip.locations.skip(1).toList()
+              : plannedTrip.locations,
+        );
         _isPlanning = false;
       });
 
       await _saveTrip();
     } catch (e) {
       setState(() => _isPlanning = false);
-      // Silently fail for auto-optimize - user can manually plan if needed
       print('Auto-optimize failed: $e');
     }
   }
 
+  /// Check if two locations are the same (within ~500m)
+  bool _isSameLocation(TripLocation a, TripLocation b) {
+    final distance = a.distanceTo(b);
+    return distance < 0.5; // Less than 500 meters
+  }
+
   Future<void> _planTrip() async {
-    if (_trip.locations.length < 2) {
+    if (_trip.locations.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Add at least 2 locations to plan a trip'),
+          content: Text('Add at least 1 destination to plan a trip'),
         ),
       );
       return;
@@ -148,8 +247,36 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
 
     try {
       final plannerService = ref.read(tripPlannerServiceProvider);
+
+      // Build locations list, avoiding duplicates with starting point
+      List<TripLocation> locationsToOptimize;
+      if (_startingPoint != null) {
+        // Filter out destinations that are same as starting point
+        final filteredDestinations = _trip.locations.where((dest) {
+          return !_isSameLocation(dest, _startingPoint!);
+        }).toList();
+
+        if (filteredDestinations.isEmpty) {
+          setState(() => _isPlanning = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Add destinations different from your starting point'),
+              ),
+            );
+          }
+          return;
+        }
+
+        locationsToOptimize = [_startingPoint!, ...filteredDestinations];
+      } else {
+        locationsToOptimize = _trip.locations;
+      }
+
+      final tripToOptimize = _trip.copyWith(locations: locationsToOptimize);
+
       final plannedTrip = await plannerService.generateTripPlan(
-        trip: _trip,
+        trip: tripToOptimize,
         startDate: DateTime.now().add(const Duration(days: 1)),
       );
 
@@ -297,6 +424,9 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
           if (_trip.status != TripStatus.draft)
             TripStatsCard(trip: _trip),
 
+          // Starting point card
+          _buildStartingPointCard(),
+
           // Locations list
           Expanded(
             child: _trip.locations.isEmpty
@@ -307,6 +437,103 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
           // Action buttons
           _buildActionButtons(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildStartingPointCard() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.green.withOpacity(0.3)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _editStartingPoint,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.my_location,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text(
+                            'Starting Point',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (_isLoadingLocation)
+                            const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.green,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _startingPoint?.name ??
+                            (_isLoadingLocation ? 'Getting current location...' : 'Tap to set starting point'),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: _startingPoint != null ? Colors.black87 : Colors.grey[600],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (_startingPoint?.address != null) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          _startingPoint!.address!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.edit_outlined,
+                  color: Colors.green[400],
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -325,7 +552,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Add locations to your trip',
+              'Add destinations to your trip',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[600],
@@ -333,7 +560,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Search for places or share locations from other apps',
+              'Search for places you want to visit',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -344,7 +571,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
             ElevatedButton.icon(
               onPressed: _addLocation,
               icon: const Icon(Icons.add),
-              label: const Text('Add Location'),
+              label: const Text('Add Destination'),
             ),
           ],
         ),
@@ -353,21 +580,39 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   Widget _buildLocationsList() {
-    return ReorderableListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _trip.locations.length,
-      onReorder: _reorderLocations,
-      itemBuilder: (context, index) {
-        final location = _trip.locations[index];
-        return LocationListItem(
-          key: ValueKey(location.id),
-          location: location,
-          index: index,
-          isFirst: index == 0,
-          isLast: index == _trip.locations.length - 1,
-          onRemove: () => _removeLocation(index),
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            'Destinations (${_trip.locations.length})',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
+            ),
+          ),
+        ),
+        Expanded(
+          child: ReorderableListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _trip.locations.length,
+            onReorder: _reorderLocations,
+            itemBuilder: (context, index) {
+              final location = _trip.locations[index];
+              return LocationListItem(
+                key: ValueKey(location.id),
+                location: location,
+                index: index,
+                isFirst: index == 0,
+                isLast: index == _trip.locations.length - 1,
+                onRemove: () => _removeLocation(index),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -391,7 +636,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
               child: OutlinedButton.icon(
                 onPressed: _addLocation,
                 icon: const Icon(Icons.add),
-                label: const Text('Add Location'),
+                label: const Text('Add Destination'),
               ),
             ),
             const SizedBox(width: 12),

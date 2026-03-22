@@ -27,9 +27,6 @@ class MapProviderSelector extends ConsumerWidget {
 
   Widget _buildProviderChips(Map<String, bool> keyStatus) {
     final hasGoogleKey = keyStatus['googleMaps'] == true;
-    final hasMapplsKey = keyStatus['mappls'] == true &&
-                         keyStatus['mapplsClientId'] == true;
-    // Bhuvan doesn't need API key for basic search
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -43,29 +40,16 @@ class MapProviderSelector extends ConsumerWidget {
             color: Colors.teal,
             isFree: true,
           ),
-          const SizedBox(width: 8),
-
-          // Only show other providers if they have API keys configured
+          // Only show Google if API key is configured
           if (hasGoogleKey) ...[
+            const SizedBox(width: 8),
             _buildProviderChip(
               provider: MapProvider.google,
               label: 'Google',
               icon: Icons.map,
               color: Colors.blue,
             ),
-            const SizedBox(width: 8),
           ],
-          if (hasMapplsKey) ...[
-            _buildProviderChip(
-              provider: MapProvider.mappls,
-              label: 'Mappls',
-              icon: Icons.explore,
-              color: Colors.green,
-            ),
-            const SizedBox(width: 8),
-          ],
-          // Note: Bhuvan requires API key and doesn't work on web due to CORS
-          // Only show if we have other providers configured (indicates advanced user)
         ],
       ),
     );

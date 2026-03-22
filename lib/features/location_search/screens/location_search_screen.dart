@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/services/map/map_service_interface.dart';
 import '../../../core/services/map/unified_map_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/location.dart';
 import '../widgets/location_search_bar.dart';
 import '../widgets/location_result_tile.dart';
-import '../widgets/map_provider_selector.dart';
 
 class LocationSearchScreen extends ConsumerStatefulWidget {
   final String mapProvider;
 
   const LocationSearchScreen({
     super.key,
-    this.mapProvider = 'openStreetMap', // Default to free OSM
+    this.mapProvider = 'openStreetMap',
   });
 
   @override
@@ -23,19 +21,12 @@ class LocationSearchScreen extends ConsumerStatefulWidget {
 
 class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
   final TextEditingController _searchController = TextEditingController();
-  List<PlacePrediction> _predictions = [];
   List<TripLocation> _searchResults = [];
   bool _isLoading = false;
-  bool _showAllProviders = false;
-  MapProvider _selectedProvider = MapProvider.openStreetMap; // Default to free OSM
 
   @override
   void initState() {
     super.initState();
-    _selectedProvider = MapProvider.values.firstWhere(
-      (p) => p.name == widget.mapProvider,
-      orElse: () => MapProvider.openStreetMap, // Fallback to free OSM
-    );
   }
 
   @override
@@ -47,7 +38,6 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
   Future<void> _onSearchChanged(String query) async {
     if (query.isEmpty) {
       setState(() {
-        _predictions = [];
         _searchResults = [];
       });
       return;
@@ -58,38 +48,18 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
     final mapService = ref.read(unifiedMapServiceProvider);
 
     try {
-      if (_showAllProviders) {
-        // Search across all providers
-        _searchResults = await mapService.searchPlacesAllProviders(query);
-        _predictions = [];
-      } else {
-        // Autocomplete with selected provider
-        _predictions = await mapService.autocomplete(
-          query,
-          provider: _selectedProvider,
-        );
-        _searchResults = [];
+      // Automatically search across all available providers
+      // The service will use whatever works (OSM is always available)
+      final results = await mapService.searchPlaces(query);
+      if (mounted) {
+        _searchResults = results;
       }
     } catch (e) {
       print('Search error: $e');
     }
 
-    setState(() => _isLoading = false);
-  }
-
-  Future<void> _onPredictionSelected(PlacePrediction prediction) async {
-    setState(() => _isLoading = true);
-
-    final mapService = ref.read(unifiedMapServiceProvider);
-    final location = await mapService.getPlaceDetails(
-      prediction.placeId,
-      prediction.source,
-    );
-
-    setState(() => _isLoading = false);
-
-    if (location != null && mounted) {
-      Navigator.of(context).pop(location);
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -97,38 +67,11 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
     Navigator.of(context).pop(location);
   }
 
-  void _onProviderChanged(MapProvider provider) {
-    setState(() {
-      _selectedProvider = provider;
-      _predictions = [];
-      _searchResults = [];
-    });
-    if (_searchController.text.isNotEmpty) {
-      _onSearchChanged(_searchController.text);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Search Location'),
-        actions: [
-          IconButton(
-            icon: Icon(
-              _showAllProviders ? Icons.filter_alt : Icons.filter_alt_outlined,
-            ),
-            onPressed: () {
-              setState(() {
-                _showAllProviders = !_showAllProviders;
-              });
-              if (_searchController.text.isNotEmpty) {
-                _onSearchChanged(_searchController.text);
-              }
-            },
-            tooltip: _showAllProviders ? 'Search selected provider' : 'Search all providers',
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -144,18 +87,6 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
               },
             ),
           ),
-
-          // Provider selector
-          if (!_showAllProviders)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MapProviderSelector(
-                selectedProvider: _selectedProvider,
-                onProviderChanged: _onProviderChanged,
-              ),
-            ),
-
-          const SizedBox(height: 8),
 
           // Loading indicator
           if (_isLoading)
@@ -175,7 +106,7 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
       return _buildEmptyState();
     }
 
-    if (_showAllProviders && _searchResults.isNotEmpty) {
+    if (_searchResults.isNotEmpty) {
       return ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: _searchResults.length,
@@ -186,22 +117,6 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
             address: location.address ?? '',
             source: location.source,
             onTap: () => _onLocationSelected(location),
-          );
-        },
-      );
-    }
-
-    if (!_showAllProviders && _predictions.isNotEmpty) {
-      return ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: _predictions.length,
-        itemBuilder: (context, index) {
-          final prediction = _predictions[index];
-          return LocationResultTile(
-            name: prediction.mainText,
-            address: prediction.secondaryText,
-            source: prediction.source,
-            onTap: () => _onPredictionSelected(prediction),
           );
         },
       );

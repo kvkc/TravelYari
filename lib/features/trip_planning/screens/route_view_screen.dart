@@ -68,6 +68,10 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
+          indicatorWeight: 3,
           tabs: [
             const Tab(text: 'Overview'),
             ...List.generate(

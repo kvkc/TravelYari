@@ -79,12 +79,8 @@ class LocationResultTile extends StatelessWidget {
     switch (source) {
       case LocationSource.googleMaps:
         return 'Google Maps';
-      case LocationSource.mappls:
-        return 'Mappls';
-      case LocationSource.bhuvan:
-        return 'Bhuvan';
       case LocationSource.openStreetMap:
-        return 'OpenStreetMap';
+        return 'OSM';
       case LocationSource.shared:
         return 'Shared';
       case LocationSource.manual:
@@ -96,10 +92,6 @@ class LocationResultTile extends StatelessWidget {
     switch (source) {
       case LocationSource.googleMaps:
         return Colors.blue;
-      case LocationSource.mappls:
-        return Colors.green;
-      case LocationSource.bhuvan:
-        return Colors.orange;
       case LocationSource.openStreetMap:
         return Colors.teal;
       case LocationSource.shared:

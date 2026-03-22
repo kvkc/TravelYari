@@ -2,8 +2,6 @@ import 'package:uuid/uuid.dart';
 
 enum LocationSource {
   googleMaps,
-  mappls,
-  bhuvan,
   openStreetMap, // Free, no API key required
   shared, // From WhatsApp/other apps
   manual,
@@ -16,8 +14,7 @@ class TripLocation {
   final double latitude;
   final double longitude;
   final LocationSource source;
-  final String? placeId; // For Google Maps
-  final String? eloc; // For Mappls (eLoc code)
+  final String? placeId;
   final Map<String, dynamic>? metadata;
   final DateTime createdAt;
 
@@ -29,7 +26,6 @@ class TripLocation {
     required this.longitude,
     required this.source,
     this.placeId,
-    this.eloc,
     this.metadata,
     DateTime? createdAt,
   })  : id = id ?? const Uuid().v4(),
@@ -42,7 +38,6 @@ class TripLocation {
     double? longitude,
     LocationSource? source,
     String? placeId,
-    String? eloc,
     Map<String, dynamic>? metadata,
   }) {
     return TripLocation(
@@ -53,7 +48,6 @@ class TripLocation {
       longitude: longitude ?? this.longitude,
       source: source ?? this.source,
       placeId: placeId ?? this.placeId,
-      eloc: eloc ?? this.eloc,
       metadata: metadata ?? this.metadata,
       createdAt: createdAt,
     );
@@ -68,25 +62,37 @@ class TripLocation {
       'longitude': longitude,
       'source': source.name,
       'placeId': placeId,
-      'eloc': eloc,
       'metadata': metadata,
       'createdAt': createdAt.toIso8601String(),
     };
   }
 
   factory TripLocation.fromJson(Map<String, dynamic> json) {
+    // Map old sources to current ones for backward compatibility
+    LocationSource parseSource(String? source) {
+      switch (source) {
+        case 'googleMaps':
+          return LocationSource.googleMaps;
+        case 'openStreetMap':
+          return LocationSource.openStreetMap;
+        case 'shared':
+          return LocationSource.shared;
+        case 'mappls':
+        case 'bhuvan':
+          return LocationSource.openStreetMap; // Legacy sources
+        default:
+          return LocationSource.manual;
+      }
+    }
+
     return TripLocation(
       id: json['id'],
       name: json['name'],
       address: json['address'],
       latitude: json['latitude'],
       longitude: json['longitude'],
-      source: LocationSource.values.firstWhere(
-        (e) => e.name == json['source'],
-        orElse: () => LocationSource.manual,
-      ),
+      source: parseSource(json['source']),
       placeId: json['placeId'],
-      eloc: json['eloc'],
       metadata: json['metadata'] != null
           ? Map<String, dynamic>.from(json['metadata'])
           : null,

@@ -22,41 +22,94 @@ class TripPlannerService {
         _amenitiesService = amenitiesService,
         _mapService = mapService;
 
+  /// Max time for the entire planning operation
+  static const Duration _planningTimeout = Duration(seconds: 60);
+
   /// Generate a complete trip plan with optimized route, daily plans, and stops
+  /// Has a timeout to prevent hanging
   Future<Trip> generateTripPlan({
+    required Trip trip,
+    DateTime? startDate,
+  }) async {
+    try {
+      return await _doGenerateTripPlan(trip: trip, startDate: startDate)
+          .timeout(_planningTimeout, onTimeout: () {
+        print('Trip planning timed out, returning basic plan');
+        return _generateBasicPlan(trip, startDate);
+      });
+    } catch (e) {
+      print('Trip planning failed: $e');
+      return _generateBasicPlan(trip, startDate);
+    }
+  }
+
+  /// Generate basic plan without amenities when full planning fails/times out
+  Trip _generateBasicPlan(Trip trip, DateTime? startDate) {
+    // Just return the trip with locations in order
+    final segments = <RouteSegment>[];
+    for (int i = 0; i < trip.locations.length - 1; i++) {
+      segments.add(RouteSegment(
+        start: trip.locations[i],
+        end: trip.locations[i + 1],
+        distanceKm: trip.locations[i].distanceTo(trip.locations[i + 1]),
+        durationMinutes: (trip.locations[i].distanceTo(trip.locations[i + 1]) / 50 * 60).round(),
+        routeProvider: 'estimated',
+      ));
+    }
+
+    double totalDistance = segments.fold(0.0, (sum, s) => sum + s.distanceKm);
+    int totalDuration = segments.fold(0, (sum, s) => sum + s.durationMinutes);
+
+    return trip.copyWith(
+      optimizedRoute: trip.locations,
+      routeSegments: segments,
+      totalDistanceKm: totalDistance,
+      estimatedDurationMinutes: totalDuration,
+      status: TripStatus.planned,
+      startDate: startDate,
+    );
+  }
+
+  Future<Trip> _doGenerateTripPlan({
     required Trip trip,
     DateTime? startDate,
   }) async {
     final prefs = trip.preferences;
 
-    // Step 1: Optimize the route order
+    // Step 1: Optimize the route order (with timeout)
     final optimizedRoute = await _routeOptimizer.optimizeRoute(
       trip.locations,
       useRoadDistances: true,
-    );
+    ).timeout(const Duration(seconds: 5), onTimeout: () => List.from(trip.locations));
 
-    // Step 2: Get detailed route segments
-    final routeSegments = await _routeOptimizer.getRouteSegments(optimizedRoute);
+    // Step 2: Get detailed route segments (with timeout)
+    final routeSegments = await _routeOptimizer.getRouteSegments(optimizedRoute)
+        .timeout(const Duration(seconds: 5), onTimeout: () => <RouteSegment>[]);
+
+    // If no segments, create basic ones
+    final segments = routeSegments.isEmpty
+        ? _createBasicSegments(optimizedRoute)
+        : routeSegments;
 
     // Step 3: Calculate total distance and duration
-    final stats = _routeOptimizer.calculateTripStatistics(routeSegments);
+    final stats = _routeOptimizer.calculateTripStatistics(segments);
 
-    // Step 4: Generate day plans with breaks and stops
-    final dayPlans = await _generateDayPlans(
-      routeSegments: routeSegments,
-      preferences: prefs,
-      startDate: startDate ?? DateTime.now(),
-    );
+    // Step 4: Generate day plans (skip amenity-heavy operations if route is short)
+    List<DayPlan> dayPlans = [];
+    if (trip.locations.length > 1) {
+      dayPlans = await _generateDayPlans(
+        routeSegments: segments,
+        preferences: prefs,
+        startDate: startDate ?? DateTime.now(),
+      ).timeout(const Duration(seconds: 45), onTimeout: () => <DayPlan>[]);
+    }
 
-    // Step 5: Find amenities for each segment
-    final segmentsWithAmenities = await _addAmenitiesToSegments(
-      routeSegments,
-      prefs,
-    );
+    // Step 5: Skip amenity search for now (too slow) - just use segments as-is
+    // Amenities can be fetched on-demand when viewing the trip
 
     return trip.copyWith(
       optimizedRoute: optimizedRoute,
-      routeSegments: segmentsWithAmenities,
+      routeSegments: segments,
       dayPlans: dayPlans,
       totalDistanceKm: stats.totalDistanceKm,
       estimatedDurationMinutes: stats.totalDurationMinutes,
@@ -65,7 +118,22 @@ class TripPlannerService {
     );
   }
 
+  List<RouteSegment> _createBasicSegments(List<TripLocation> locations) {
+    final segments = <RouteSegment>[];
+    for (int i = 0; i < locations.length - 1; i++) {
+      segments.add(RouteSegment(
+        start: locations[i],
+        end: locations[i + 1],
+        distanceKm: locations[i].distanceTo(locations[i + 1]),
+        durationMinutes: (locations[i].distanceTo(locations[i + 1]) / 50 * 60).round(),
+        routeProvider: 'estimated',
+      ));
+    }
+    return segments;
+  }
+
   /// Generate day-by-day plans respecting daily distance limits
+  /// Handles long segments by splitting them into multiple days
   Future<List<DayPlan>> _generateDayPlans({
     required List<RouteSegment> routeSegments,
     required TripPreferences preferences,
@@ -73,7 +141,6 @@ class TripPlannerService {
   }) async {
     List<DayPlan> dayPlans = [];
     double accumulatedDistance = 0;
-    double distanceSinceLastBreak = 0;
     int dayNumber = 1;
     DateTime currentDate = startDate;
 
@@ -81,76 +148,273 @@ class TripPlannerService {
     TripLocation? dayStartLocation;
     TripLocation? lastLocation;
 
+    final maxDaily = preferences.maxDailyDistanceKm;
+
     for (int i = 0; i < routeSegments.length; i++) {
       final segment = routeSegments[i];
 
       // Initialize day start location
       dayStartLocation ??= segment.start;
-      lastLocation = segment.start;
+      lastLocation ??= segment.start;
 
-      // Check if we need a break
-      distanceSinceLastBreak += segment.distanceKm;
-      if (distanceSinceLastBreak >= preferences.breakIntervalKm) {
-        // Add a break stop
-        final breakStop = await _findBreakStop(
-          segment.polylinePoints.isNotEmpty
-              ? segment.polylinePoints[segment.polylinePoints.length ~/ 2]
-              : LatLng(
-                  (segment.start.latitude + segment.end.latitude) / 2,
-                  (segment.start.longitude + segment.end.longitude) / 2,
-                ),
-          StopType.teaBreak,
-          preferences,
-        );
-
-        if (breakStop != null) {
-          currentDayStops.add(breakStop.copyWith(
-            distanceFromPreviousKm: distanceSinceLastBreak,
+      // Check if this single segment exceeds daily limit - need to split it
+      if (segment.distanceKm > maxDaily) {
+        // First, close out any accumulated distance from previous segments
+        if (accumulatedDistance > 0) {
+          dayPlans.add(DayPlan(
+            dayNumber: dayNumber,
+            date: currentDate,
+            startLocation: dayStartLocation,
+            endLocation: lastLocation,
+            totalDistanceKm: accumulatedDistance,
+            totalDurationMinutes: _estimateDuration(accumulatedDistance),
+            stops: currentDayStops,
           ));
+          dayNumber++;
+          currentDate = currentDate.add(const Duration(days: 1));
+          accumulatedDistance = 0;
+          currentDayStops = [];
         }
 
-        distanceSinceLastBreak = 0;
-      }
+        // Split this long segment into multiple days
+        final daysNeeded = (segment.distanceKm / maxDaily).ceil();
+        final distancePerDay = segment.distanceKm / daysNeeded;
 
-      // Check if adding this segment exceeds daily limit
-      if (accumulatedDistance + segment.distanceKm > preferences.maxDailyDistanceKm) {
-        // End the current day
-        if (currentDayStops.isNotEmpty || dayStartLocation != null) {
-          // Find stay option for overnight
-          Amenity? stayOption;
-          if (preferences.findStayOptions) {
-            stayOption = await _findStayOption(
-              lastLocation!,
-              preferences,
+        for (int day = 0; day < daysNeeded; day++) {
+          final isLastDay = day == daysNeeded - 1;
+          final fraction = (day + 1) / daysNeeded;
+          final prevFraction = day / daysNeeded;
+
+          // Calculate intermediate point for this day's end
+          final dayEndLat = segment.start.latitude +
+              (segment.end.latitude - segment.start.latitude) * fraction;
+          final dayEndLng = segment.start.longitude +
+              (segment.end.longitude - segment.start.longitude) * fraction;
+
+          final dayStartLat = segment.start.latitude +
+              (segment.end.latitude - segment.start.latitude) * prevFraction;
+          final dayStartLng = segment.start.longitude +
+              (segment.end.longitude - segment.start.longitude) * prevFraction;
+
+          // Get actual place names via reverse geocoding
+          TripLocation dayStart;
+          TripLocation dayEnd;
+
+          if (day == 0) {
+            dayStart = segment.start;
+          } else {
+            // Reverse geocode to get actual city name
+            final startLocation = await _mapService.reverseGeocode(dayStartLat, dayStartLng);
+            dayStart = startLocation ?? TripLocation(
+              name: 'Day $dayNumber Start',
+              latitude: dayStartLat,
+              longitude: dayStartLng,
+              source: LocationSource.openStreetMap,
             );
+          }
+
+          if (isLastDay) {
+            dayEnd = segment.end;
+          } else {
+            // Reverse geocode to get actual city/town name for overnight stop
+            final endLocation = await _mapService.reverseGeocode(dayEndLat, dayEndLng);
+            final kmFromStart = (distancePerDay * (day + 1)).round();
+            dayEnd = endLocation ?? TripLocation(
+              name: 'Night Halt (~${kmFromStart}km)',
+              latitude: dayEndLat,
+              longitude: dayEndLng,
+              source: LocationSource.openStreetMap,
+            );
+          }
+
+          final stops = <PlannedStop>[];
+
+          // Add break stops based on distance (every breakIntervalKm)
+          final breakInterval = preferences.breakIntervalKm;
+          int numBreaks = (distancePerDay / breakInterval).floor();
+          if (numBreaks > 0) {
+            for (int b = 1; b <= numBreaks && b <= 3; b++) {
+              final breakFraction = prevFraction + (fraction - prevFraction) * (b / (numBreaks + 1));
+              final breakLat = segment.start.latitude +
+                  (segment.end.latitude - segment.start.latitude) * breakFraction;
+              final breakLng = segment.start.longitude +
+                  (segment.end.longitude - segment.start.longitude) * breakFraction;
+
+              stops.add(PlannedStop(
+                location: TripLocation(
+                  name: 'Tea/Rest Break ${b}',
+                  latitude: breakLat,
+                  longitude: breakLng,
+                  source: LocationSource.openStreetMap,
+                ),
+                type: StopType.teaBreak,
+                plannedDurationMinutes: preferences.breakDurationMinutes,
+                distanceFromPreviousKm: breakInterval,
+              ));
+            }
+          }
+
+          // Add fuel stop if needed (roughly every 300km)
+          if (distancePerDay > 250 && (preferences.findPetrolStations || preferences.findEvStations)) {
+            final fuelFraction = prevFraction + (fraction - prevFraction) * 0.6;
+            final fuelLat = segment.start.latitude +
+                (segment.end.latitude - segment.start.latitude) * fuelFraction;
+            final fuelLng = segment.start.longitude +
+                (segment.end.longitude - segment.start.longitude) * fuelFraction;
+
+            stops.add(PlannedStop(
+              location: TripLocation(
+                name: preferences.findEvStations ? 'EV Charging Stop' : 'Fuel Stop',
+                latitude: fuelLat,
+                longitude: fuelLng,
+                source: LocationSource.openStreetMap,
+              ),
+              type: StopType.fuelStop,
+              plannedDurationMinutes: preferences.findEvStations ? 30 : 15,
+              distanceFromPreviousKm: distancePerDay * 0.6,
+            ));
+          }
+
+          // Add destination stop only on last day of this segment
+          if (isLastDay) {
+            stops.add(PlannedStop(
+              location: segment.end,
+              type: StopType.destination,
+              plannedDurationMinutes: 30,
+              distanceFromPreviousKm: distancePerDay,
+            ));
+          } else {
+            // Find hotel/stay option for overnight
+            Amenity? stayAmenity;
+            if (preferences.findStayOptions) {
+              stayAmenity = await _findStayOption(dayEnd, preferences);
+            }
+
+            // Add overnight stop with hotel info
+            stops.add(PlannedStop(
+              location: stayAmenity != null
+                  ? TripLocation(
+                      name: stayAmenity.name,
+                      address: stayAmenity.address,
+                      latitude: stayAmenity.latitude,
+                      longitude: stayAmenity.longitude,
+                      source: LocationSource.openStreetMap,
+                    )
+                  : dayEnd,
+              amenity: stayAmenity,
+              type: StopType.overnight,
+              plannedDurationMinutes: 480, // 8 hours rest
+              distanceFromPreviousKm: distancePerDay,
+            ));
+          }
+
+          // Get stayOption for the DayPlan
+          Amenity? dayStayOption;
+          if (!isLastDay && preferences.findStayOptions) {
+            dayStayOption = await _findStayOption(dayEnd, preferences);
           }
 
           dayPlans.add(DayPlan(
             dayNumber: dayNumber,
             date: currentDate,
-            startLocation: dayStartLocation!,
-            endLocation: lastLocation!,
-            totalDistanceKm: accumulatedDistance,
-            totalDurationMinutes: _estimateDuration(accumulatedDistance),
-            stops: currentDayStops,
-            stayOption: stayOption,
+            startLocation: dayStart,
+            endLocation: dayEnd,
+            totalDistanceKm: distancePerDay,
+            totalDurationMinutes: _estimateDuration(distancePerDay),
+            stops: stops,
+            stayOption: dayStayOption,
           ));
 
-          // Start new day
           dayNumber++;
           currentDate = currentDate.add(const Duration(days: 1));
-          accumulatedDistance = 0;
-          distanceSinceLastBreak = 0;
-          currentDayStops = [];
-          dayStartLocation = segment.start;
         }
+
+        // Reset for next segment
+        dayStartLocation = segment.end;
+        lastLocation = segment.end;
+        accumulatedDistance = 0;
+        currentDayStops = [];
+        continue;
+      }
+
+      // Normal case: segment fits within daily limit
+      // Check if adding this segment exceeds daily limit
+      if (accumulatedDistance + segment.distanceKm > maxDaily && accumulatedDistance > 0) {
+        // End the current day before adding this segment
+        Amenity? stayOption;
+        if (preferences.findStayOptions) {
+          stayOption = await _findStayOption(lastLocation!, preferences);
+        }
+
+        dayPlans.add(DayPlan(
+          dayNumber: dayNumber,
+          date: currentDate,
+          startLocation: dayStartLocation!,
+          endLocation: lastLocation!,
+          totalDistanceKm: accumulatedDistance,
+          totalDurationMinutes: _estimateDuration(accumulatedDistance),
+          stops: currentDayStops,
+          stayOption: stayOption,
+        ));
+
+        // Start new day
+        dayNumber++;
+        currentDate = currentDate.add(const Duration(days: 1));
+        accumulatedDistance = 0;
+        currentDayStops = [];
+        dayStartLocation = segment.start;
+      }
+
+      // Add break stops based on segment distance
+      final breakInterval = preferences.breakIntervalKm;
+      if (segment.distanceKm > breakInterval) {
+        final numBreaks = (segment.distanceKm / breakInterval).floor();
+        for (int b = 1; b <= numBreaks && b <= 2; b++) {
+          final breakFraction = b / (numBreaks + 1);
+          final breakLat = segment.start.latitude +
+              (segment.end.latitude - segment.start.latitude) * breakFraction;
+          final breakLng = segment.start.longitude +
+              (segment.end.longitude - segment.start.longitude) * breakFraction;
+
+          currentDayStops.add(PlannedStop(
+            location: TripLocation(
+              name: 'Tea/Rest Break',
+              latitude: breakLat,
+              longitude: breakLng,
+              source: LocationSource.openStreetMap,
+            ),
+            type: StopType.teaBreak,
+            plannedDurationMinutes: preferences.breakDurationMinutes,
+            distanceFromPreviousKm: segment.distanceKm * breakFraction,
+          ));
+        }
+      }
+
+      // Add fuel stop for longer segments
+      if (segment.distanceKm > 200 && (preferences.findPetrolStations || preferences.findEvStations)) {
+        final fuelLat = segment.start.latitude +
+            (segment.end.latitude - segment.start.latitude) * 0.5;
+        final fuelLng = segment.start.longitude +
+            (segment.end.longitude - segment.start.longitude) * 0.5;
+
+        currentDayStops.add(PlannedStop(
+          location: TripLocation(
+            name: preferences.findEvStations ? 'EV Charging Stop' : 'Fuel Stop',
+            latitude: fuelLat,
+            longitude: fuelLng,
+            source: LocationSource.openStreetMap,
+          ),
+          type: StopType.fuelStop,
+          plannedDurationMinutes: preferences.findEvStations ? 30 : 15,
+          distanceFromPreviousKm: segment.distanceKm * 0.5,
+        ));
       }
 
       // Add destination as a stop
       currentDayStops.add(PlannedStop(
         location: segment.end,
         type: StopType.destination,
-        plannedDurationMinutes: 30, // Default visit time
+        plannedDurationMinutes: 30,
         distanceFromPreviousKm: segment.distanceKm,
       ));
 
@@ -158,8 +422,8 @@ class TripPlannerService {
       lastLocation = segment.end;
     }
 
-    // Add final day
-    if (currentDayStops.isNotEmpty && dayStartLocation != null && lastLocation != null) {
+    // Add final day if there's remaining distance
+    if (accumulatedDistance > 0 && dayStartLocation != null && lastLocation != null) {
       dayPlans.add(DayPlan(
         dayNumber: dayNumber,
         date: currentDate,

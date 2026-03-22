@@ -28,15 +28,6 @@ class LocationParser {
     caseSensitive: false,
   );
 
-  static final RegExp _mapplsUrlPattern = RegExp(
-    r'https?://(?:www\.)?mappls\.com/[^\s]*',
-    caseSensitive: false,
-  );
-
-  static final RegExp _mapplsElocPattern = RegExp(
-    r'[A-Z0-9]{6}',
-  );
-
   static final RegExp _whatThreeWordsPattern = RegExp(
     r'///([a-z]+\.[a-z]+\.[a-z]+)',
     caseSensitive: false,
@@ -63,12 +54,6 @@ class LocationParser {
     final shortMatch = _mapsShortLinkPattern.firstMatch(text);
     if (shortMatch != null) {
       return parseUrl(shortMatch.group(0)!, ref);
-    }
-
-    // Check for Mappls URL
-    final mapplsMatch = _mapplsUrlPattern.firstMatch(text);
-    if (mapplsMatch != null) {
-      return parseUrl(mapplsMatch.group(0)!, ref);
     }
 
     // Check for WhatsApp location format
@@ -118,11 +103,6 @@ class LocationParser {
       return _parseGoogleMapsUrl(url, mapService);
     }
 
-    // Mappls URL
-    if (url.contains('mappls.com')) {
-      return _parseMapplsUrl(url, mapService);
-    }
-
     return null;
   }
 
@@ -169,30 +149,6 @@ class LocationParser {
     for (var match in allCoords) {
       final lat = double.tryParse(match.group(1)!);
       final lng = double.tryParse(match.group(2)!);
-      if (lat != null && lng != null && _isValidCoordinate(lat, lng)) {
-        return mapService.reverseGeocode(lat, lng);
-      }
-    }
-
-    return null;
-  }
-
-  static Future<TripLocation?> _parseMapplsUrl(
-    String url,
-    UnifiedMapService mapService,
-  ) async {
-    // Extract eLoc code from Mappls URL
-    final elocMatch = _mapplsElocPattern.firstMatch(url);
-    if (elocMatch != null) {
-      final eloc = elocMatch.group(0)!;
-      return mapService.getPlaceDetails(eloc, LocationSource.mappls);
-    }
-
-    // Try coordinates
-    final coordMatch = _coordinatePattern.firstMatch(url);
-    if (coordMatch != null) {
-      final lat = double.tryParse(coordMatch.group(1)!);
-      final lng = double.tryParse(coordMatch.group(2)!);
       if (lat != null && lng != null && _isValidCoordinate(lat, lng)) {
         return mapService.reverseGeocode(lat, lng);
       }
