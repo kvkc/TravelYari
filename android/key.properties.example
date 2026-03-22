@@ -1,0 +1,8 @@
+# Keystore configuration for release builds
+# Copy this to key.properties and fill in your values
+# NEVER commit key.properties to git!
+
+storePassword=your_keystore_password
+keyPassword=your_key_password
+keyAlias=your_alias
+storeFile=path/to/your/keystore.jks

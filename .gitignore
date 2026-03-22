@@ -86,6 +86,11 @@ lib/core/services/api_keys_prod.dart
 .env
 *.env.local
 
+# Keystores - NEVER commit these!
+*.jks
+*.keystore
+key.properties
+
 # Generated files
 *.g.dart
 *.freezed.dart
