@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/api_key_storage.dart';
 import '../../../core/services/map/unified_map_service.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -75,19 +77,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _buildDistanceUnitTile(),
 
-          _buildSectionHeader('Accounts'),
-          _buildAccountTile(
-            title: 'Google Account',
-            subtitle: 'Sign in for better restaurant data',
-            icon: Icons.account_circle,
-            onTap: _signInGoogle,
-          ),
-          _buildAccountTile(
-            title: 'Zomato Account',
-            subtitle: 'Connect for restaurant ratings',
-            icon: Icons.restaurant_menu,
-            onTap: _signInZomato,
-          ),
+          _buildSectionHeader('API Keys'),
+          _buildApiKeysTile(),
 
           _buildSectionHeader('Data'),
           _buildActionTile(
@@ -160,6 +151,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return 'Mappls (MapMyIndia)';
       case MapProvider.bhuvan:
         return 'Bhuvan (ISRO)';
+      case MapProvider.openStreetMap:
+        return 'OpenStreetMap (Free)';
     }
   }
 
@@ -245,18 +238,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildAccountTile({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: onTap,
+  Widget _buildApiKeysTile() {
+    final keyStatus = ref.watch(apiKeyStatusProvider);
+
+    return keyStatus.when(
+      data: (status) {
+        final configuredCount = status.values.where((v) => v).length;
+        final subtitle = configuredCount > 0
+            ? '$configuredCount API key${configuredCount > 1 ? 's' : ''} configured'
+            : 'Using free OpenStreetMap (no keys needed)';
+
+        return ListTile(
+          leading: const Icon(Icons.key),
+          title: const Text('Manage API Keys'),
+          subtitle: Text(subtitle),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (configuredCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.successColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Premium',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.successColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+          onTap: () {
+            Navigator.pushNamed(context, AppRouter.apiKeys).then((_) {
+              ref.invalidate(apiKeyStatusProvider);
+            });
+          },
+        );
+      },
+      loading: () => const ListTile(
+        leading: Icon(Icons.key),
+        title: Text('Manage API Keys'),
+        subtitle: Text('Loading...'),
+      ),
+      error: (_, __) => ListTile(
+        leading: const Icon(Icons.key),
+        title: const Text('Manage API Keys'),
+        subtitle: const Text('Using free OpenStreetMap'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.pushNamed(context, AppRouter.apiKeys),
+      ),
     );
   }
 
@@ -284,22 +321,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       leading: Icon(icon),
       title: Text(title),
       subtitle: Text(subtitle),
-    );
-  }
-
-  void _signInGoogle() {
-    // Implement Google sign-in
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Google sign-in coming soon!')),
-    );
-  }
-
-  void _signInZomato() {
-    // Note: Zomato public API is deprecated
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Zomato integration uses Google Places data instead'),
-      ),
     );
   }
 

@@ -6,6 +6,7 @@ import '../../features/trip_planning/screens/route_view_screen.dart';
 import '../../features/trip_planning/models/location.dart';
 import '../../features/location_search/screens/location_search_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
+import '../../features/settings/screens/api_keys_screen.dart';
 import '../../features/amenities/screens/amenities_screen.dart';
 
 class AppRouter {
@@ -14,6 +15,7 @@ class AppRouter {
   static const String routeView = '/route-view';
   static const String locationSearch = '/location-search';
   static const String settings = '/settings';
+  static const String apiKeys = '/api-keys';
   static const String amenities = '/amenities';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
@@ -47,6 +49,10 @@ class AppRouter {
       case AppRouter.settings:
         return MaterialPageRoute(
           builder: (_) => const SettingsScreen(),
+        );
+      case apiKeys:
+        return MaterialPageRoute(
+          builder: (_) => const ApiKeysScreen(),
         );
       case amenities:
         final args = settings.arguments as Map<String, dynamic>;

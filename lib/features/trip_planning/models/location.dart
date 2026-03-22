@@ -4,6 +4,7 @@ enum LocationSource {
   googleMaps,
   mappls,
   bhuvan,
+  openStreetMap, // Free, no API key required
   shared, // From WhatsApp/other apps
   manual,
 }
