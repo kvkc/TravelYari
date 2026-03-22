@@ -12,11 +12,15 @@ enum MapProvider {
   openStreetMap, // Free fallback, no API key needed
 }
 
-/// Unified map service that uses OSM (free) by default
-/// and optionally Google Maps if API key is configured.
+/// Unified map service using HYBRID approach for cost optimization:
+/// - Map display: Google Maps (if key) or OSM (free fallback)
+/// - Place search: Google Places (if key) or Photon/Nominatim (free fallback)
+/// - Routing/Directions: Always OSRM (FREE - saves the most money!)
+/// - Distance Matrix: Always OSRM (FREE)
+/// - Reverse Geocoding: Always OSM Nominatim/Photon (FREE)
 class UnifiedMapService {
-  /// Timeout for individual service calls (3 seconds)
-  static const Duration _serviceTimeout = Duration(seconds: 3);
+  /// Timeout for individual service calls
+  static const Duration _serviceTimeout = Duration(seconds: 5);
 
   /// Helper to wrap service calls with timeout
   Future<T?> _withTimeout<T>(Future<T?> Function() fn) async {
@@ -64,15 +68,18 @@ class UnifiedMapService {
     return services;
   }
 
-  /// Search places - uses OSM by default, Google if configured
+  /// Search places - HYBRID: Google Places if key (better UX), else OSM (free)
   Future<List<TripLocation>> searchPlaces(
     String query, {
     LatLng? nearLocation,
     MapProvider? provider,
   }) async {
+    // Prefer Google for search if key available (better results, autocomplete)
     final services = provider != null
         ? [_getService(provider)]
-        : _availableServices;
+        : hasGoogleKey
+            ? [_googleService, _osmService]  // Google first if available
+            : [_osmService];                  // OSM only if no key
 
     for (var service in services) {
       try {
@@ -122,58 +129,57 @@ class UnifiedMapService {
     return service.getPlaceDetails(placeId);
   }
 
+  /// Reverse geocode - ALWAYS use OSM (FREE, no cost)
   Future<TripLocation?> reverseGeocode(double latitude, double longitude) async {
-    for (var service in _availableServices) {
-      try {
-        final result = await service.reverseGeocode(latitude, longitude)
-            .timeout(_serviceTimeout, onTimeout: () => null);
-        if (result != null) return result;
-      } catch (e) {
-        continue;
-      }
+    // Always use OSM for reverse geocoding - it's free!
+    try {
+      final result = await _osmService.reverseGeocode(latitude, longitude)
+          .timeout(_serviceTimeout, onTimeout: () => null);
+      if (result != null) return result;
+    } catch (e) {
+      print('OSM reverse geocode failed: $e');
     }
     return null;
   }
 
+  /// Get directions - ALWAYS use OSRM (FREE - biggest cost saver!)
+  /// Google Directions API costs $5/1000 requests - OSRM is free
   Future<RouteSegment?> getDirections(
     TripLocation origin,
     TripLocation destination, {
     List<TripLocation>? waypoints,
-    MapProvider? provider,
+    MapProvider? provider,  // Ignored - always uses OSRM for cost savings
   }) async {
-    final services = provider != null
-        ? [_getService(provider)]
-        : _availableServices;
-
-    for (var service in services) {
-      final result = await _withTimeout(() => service.getDirections(
+    // Always use OSRM for directions - saves $5 per 1000 requests!
+    try {
+      final result = await _osmService.getDirections(
         origin,
         destination,
         waypoints: waypoints,
-      ));
+      ).timeout(const Duration(seconds: 10), onTimeout: () => null);
       if (result != null) return result;
+    } catch (e) {
+      print('OSRM directions failed: $e');
     }
 
     return null;
   }
 
+  /// Get distance matrix - ALWAYS use OSRM (FREE - huge cost saver!)
+  /// Google Distance Matrix costs $5/1000 elements - a 10-stop trip = 100 elements!
   Future<List<List<double>>> getDistanceMatrix(
     List<TripLocation> origins,
     List<TripLocation> destinations, {
-    MapProvider? provider,
+    MapProvider? provider,  // Ignored - always uses OSRM for cost savings
   }) async {
-    final services = provider != null
-        ? [_getService(provider)]
-        : _availableServices;
-
-    for (var service in services) {
-      try {
-        final result = await service.getDistanceMatrix(origins, destinations)
-            .timeout(_serviceTimeout, onTimeout: () => <List<double>>[]);
-        if (result.isNotEmpty) return result;
-      } catch (e) {
-        continue;
-      }
+    // Always use OSRM for distance matrix - saves $5 per 1000 elements!
+    // A trip with 10 stops = 100 elements = $0.50 per trip on Google!
+    try {
+      final result = await _osmService.getDistanceMatrix(origins, destinations)
+          .timeout(const Duration(seconds: 10), onTimeout: () => <List<double>>[]);
+      if (result.isNotEmpty) return result;
+    } catch (e) {
+      print('OSRM distance matrix failed: $e');
     }
 
     // Fallback to straight-line distances
@@ -184,43 +190,44 @@ class UnifiedMapService {
     }).toList();
   }
 
+  /// Search nearby places (hotels, fuel stations, etc.) - ALWAYS use OSM (FREE)
+  /// Google Places Nearby costs $32/1000 requests - OSM is free!
   Future<List<TripLocation>> searchNearby(
     double latitude,
     double longitude, {
     required String type,
     int radiusMeters = 5000,
-    MapProvider? provider,
+    MapProvider? provider,  // Ignored - always uses OSM for cost savings
   }) async {
-    final services = provider != null
-        ? [_getService(provider)]
-        : _availableServices;
-
-    for (var service in services) {
-      try {
-        final results = await service.searchNearby(
-          latitude,
-          longitude,
-          type: type,
-          radiusMeters: radiusMeters,
-        ).timeout(_serviceTimeout, onTimeout: () => <TripLocation>[]);
-        if (results.isNotEmpty) return results;
-      } catch (e) {
-        print('${service.providerName} nearby search failed: $e');
-        continue;
-      }
+    // Always use OSM for nearby search - saves $32 per 1000 requests!
+    try {
+      final results = await _osmService.searchNearby(
+        latitude,
+        longitude,
+        type: type,
+        radiusMeters: radiusMeters,
+      ).timeout(const Duration(seconds: 8), onTimeout: () => <TripLocation>[]);
+      if (results.isNotEmpty) return results;
+    } catch (e) {
+      print('OSM nearby search failed: $e');
     }
 
     return [];
   }
 
+  /// Autocomplete - HYBRID: Google Places if key (better UX), else OSM (free)
+  /// Google Places Autocomplete costs $2.83/1000 - worth it for UX
   Future<List<PlacePrediction>> autocomplete(
     String input, {
     LatLng? location,
     MapProvider? provider,
   }) async {
+    // Prefer Google for autocomplete if key available (much better UX)
     final services = provider != null
         ? [_getService(provider)]
-        : _availableServices;
+        : hasGoogleKey
+            ? [_googleService, _osmService]  // Google first if available
+            : [_osmService];                  // OSM only if no key
 
     for (var service in services) {
       try {
