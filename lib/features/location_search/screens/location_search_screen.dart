@@ -14,7 +14,7 @@ class LocationSearchScreen extends ConsumerStatefulWidget {
 
   const LocationSearchScreen({
     super.key,
-    this.mapProvider = 'google',
+    this.mapProvider = 'openStreetMap', // Default to free OSM
   });
 
   @override
@@ -27,14 +27,14 @@ class _LocationSearchScreenState extends ConsumerState<LocationSearchScreen> {
   List<TripLocation> _searchResults = [];
   bool _isLoading = false;
   bool _showAllProviders = false;
-  MapProvider _selectedProvider = MapProvider.google;
+  MapProvider _selectedProvider = MapProvider.openStreetMap; // Default to free OSM
 
   @override
   void initState() {
     super.initState();
     _selectedProvider = MapProvider.values.firstWhere(
       (p) => p.name == widget.mapProvider,
-      orElse: () => MapProvider.google,
+      orElse: () => MapProvider.openStreetMap, // Fallback to free OSM
     );
   }
 

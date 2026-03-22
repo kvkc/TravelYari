@@ -284,23 +284,17 @@ final osmServiceProvider = Provider<OsmService>((ref) {
   return OsmService();
 });
 
-/// Google Maps Service - uses user key if available, falls back to default
-final googleMapsServiceProvider = FutureProvider<GoogleMapsService>((ref) async {
-  final userKey = await ApiKeyStorage.getGoogleMapsKey();
-  final apiKey = userKey?.isNotEmpty == true ? userKey! : ApiKeys.googleMaps;
-  return GoogleMapsService(apiKey: apiKey);
+/// Google Maps Service - uses default keys (user keys loaded async when needed)
+final googleMapsServiceProvider = Provider<GoogleMapsService>((ref) {
+  return GoogleMapsService(apiKey: ApiKeys.googleMaps);
 });
 
-/// Mappls Service - uses user keys if available
-final mapplsServiceProvider = FutureProvider<MapplsService>((ref) async {
-  final userKey = await ApiKeyStorage.getMapplsKey();
-  final userClientId = await ApiKeyStorage.getMapplsClientId();
-  final userClientSecret = await ApiKeyStorage.getMapplsClientSecret();
-
+/// Mappls Service
+final mapplsServiceProvider = Provider<MapplsService>((ref) {
   return MapplsService(
-    apiKey: userKey?.isNotEmpty == true ? userKey! : ApiKeys.mappls,
-    clientId: userClientId?.isNotEmpty == true ? userClientId! : ApiKeys.mapplsClientId,
-    clientSecret: userClientSecret?.isNotEmpty == true ? userClientSecret! : ApiKeys.mapplsClientSecret,
+    apiKey: ApiKeys.mappls,
+    clientId: ApiKeys.mapplsClientId,
+    clientSecret: ApiKeys.mapplsClientSecret,
   );
 });
 
@@ -310,9 +304,10 @@ final bhuvanServiceProvider = Provider<BhuvanService>((ref) {
 });
 
 /// Unified Map Service - combines all providers with OSM as free fallback
-final unifiedMapServiceProvider = FutureProvider<UnifiedMapService>((ref) async {
-  final googleService = await ref.watch(googleMapsServiceProvider.future);
-  final mapplsService = await ref.watch(mapplsServiceProvider.future);
+/// Uses default API keys, falling back to OSM (free) when they fail
+final unifiedMapServiceProvider = Provider<UnifiedMapService>((ref) {
+  final googleService = ref.watch(googleMapsServiceProvider);
+  final mapplsService = ref.watch(mapplsServiceProvider);
   final bhuvanService = ref.watch(bhuvanServiceProvider);
   final osmService = ref.watch(osmServiceProvider);
 
@@ -321,29 +316,7 @@ final unifiedMapServiceProvider = FutureProvider<UnifiedMapService>((ref) async 
     mapplsService: mapplsService,
     bhuvanService: bhuvanService,
     osmService: osmService,
-  );
-});
-
-/// Sync version for places where we can't await
-/// Uses OSM as the primary since it's always available
-final unifiedMapServiceSyncProvider = Provider<UnifiedMapService>((ref) {
-  // Create services with default/placeholder keys
-  // OSM is the reliable fallback
-  final googleService = GoogleMapsService(apiKey: ApiKeys.googleMaps);
-  final mapplsService = MapplsService(
-    apiKey: ApiKeys.mappls,
-    clientId: ApiKeys.mapplsClientId,
-    clientSecret: ApiKeys.mapplsClientSecret,
-  );
-  final bhuvanService = BhuvanService(apiKey: ApiKeys.bhuvan);
-  final osmService = OsmService();
-
-  return UnifiedMapService(
-    googleService: googleService,
-    mapplsService: mapplsService,
-    bhuvanService: bhuvanService,
-    osmService: osmService,
-    // Default to OSM since it's free and always works
+    // Default to OSM since it's free and always works without API keys
     primaryProvider: MapProvider.openStreetMap,
   );
 });

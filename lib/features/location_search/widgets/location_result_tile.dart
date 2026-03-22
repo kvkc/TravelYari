@@ -83,6 +83,8 @@ class LocationResultTile extends StatelessWidget {
         return 'Mappls';
       case LocationSource.bhuvan:
         return 'Bhuvan';
+      case LocationSource.openStreetMap:
+        return 'OpenStreetMap';
       case LocationSource.shared:
         return 'Shared';
       case LocationSource.manual:
@@ -98,6 +100,8 @@ class LocationResultTile extends StatelessWidget {
         return Colors.green;
       case LocationSource.bhuvan:
         return Colors.orange;
+      case LocationSource.openStreetMap:
+        return Colors.teal;
       case LocationSource.shared:
         return Colors.purple;
       case LocationSource.manual:

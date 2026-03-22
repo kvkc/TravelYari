@@ -156,6 +156,10 @@ class LocationListItem extends StatelessWidget {
         label = 'Bhuvan';
         color = Colors.orange;
         break;
+      case LocationSource.openStreetMap:
+        label = 'OSM';
+        color = Colors.teal;
+        break;
       case LocationSource.shared:
         label = 'Shared';
         color = Colors.purple;

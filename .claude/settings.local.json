@@ -17,7 +17,21 @@
       "Bash(flutter doctor:*)",
       "Bash(flutter pub:*)",
       "Bash(flutter run:*)",
-      "Bash(flutter create:*)"
+      "Bash(flutter create:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(export PATH=\"$PATH:$HOME/flutter/bin\")",
+      "Read(//c/Users/**)",
+      "Bash(where flutter:*)",
+      "Bash(cmd.exe /c \"flutter run -d chrome\")",
+      "Read(//c//**)",
+      "Read(//c/src/**)",
+      "Read(//d//**)",
+      "Bash(\"/c/Users/GAIAN SOLUTIONS/flutter/bin/flutter\" run -d chrome)",
+      "Bash(cmd.exe /c \"set PATH=%PATH%;C:\\\\Users\\\\GAIAN SOLUTIONS\\\\flutter\\\\bin && cd /d D:\\\\TravelAPP && flutter run -d chrome\" 2>&1)",
+      "Bash(cmd.exe /c \"set \\\\\"PATH=%PATH%;C:\\\\Users\\\\GAIAN SOLUTIONS\\\\flutter\\\\bin\\\\\" && flutter --version\" 2>&1)",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\GAIAN SOLUTIONS\\\\flutter\\\\bin\\\\flutter.bat' --version\" 2>&1)",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\GAIAN SOLUTIONS\\\\flutter\\\\flutter\\\\bin\\\\flutter.bat' --version\" 2>&1)",
+      "Bash(powershell.exe -Command \"cd 'D:\\\\TravelAPP'; & 'C:\\\\Users\\\\GAIAN SOLUTIONS\\\\flutter\\\\flutter\\\\bin\\\\flutter.bat' run -d chrome\" 2>&1)"
     ]
   }
 }

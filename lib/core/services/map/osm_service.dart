@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../features/trip_planning/models/location.dart';
 import '../../../features/trip_planning/models/route_segment.dart';
@@ -10,13 +11,17 @@ class OsmService implements MapServiceInterface {
 
   // Free public OSRM server (has rate limits, but works for personal use)
   static const String _osrmBaseUrl = 'https://router.project-osrm.org';
-  // Nominatim for geocoding (free, requires User-Agent)
+  // Nominatim for geocoding (free, CORS-enabled)
   static const String _nominatimBaseUrl = 'https://nominatim.openstreetmap.org';
-  // Photon for autocomplete (free, fast)
+  // Photon for autocomplete (free, fast, CORS-enabled)
   static const String _photonBaseUrl = 'https://photon.komoot.io';
 
   OsmService() : _dio = Dio() {
-    _dio.options.headers['User-Agent'] = 'YatraPlanner/1.0';
+    _dio.options.headers['User-Agent'] = 'YatraPlanner/1.0 (travel planning app)';
+    _dio.options.headers['Accept'] = 'application/json';
+    // Add timeout for better UX
+    _dio.options.connectTimeout = const Duration(seconds: 10);
+    _dio.options.receiveTimeout = const Duration(seconds: 10);
   }
 
   @override
@@ -123,12 +128,12 @@ class OsmService implements MapServiceInterface {
       if (response.statusCode == 200 && response.data['code'] == 'Ok') {
         final route = response.data['routes'][0];
         return RouteSegment(
-          startLocation: origin,
-          endLocation: destination,
+          start: origin,
+          end: destination,
           distanceKm: route['distance'] / 1000,
           durationMinutes: (route['duration'] / 60).round(),
-          polylinePoints: route['geometry'],
-          source: LocationSource.openStreetMap,
+          polylinePoints: _decodePolyline(route['geometry']),
+          routeProvider: 'openStreetMap',
         );
       }
     } catch (e) {
@@ -197,24 +202,19 @@ class OsmService implements MapServiceInterface {
       // Convert type to OSM amenity
       final osmType = _convertToOsmType(type);
 
-      // Use Overpass API for nearby search (free)
-      final query = '''
-        [out:json][timeout:10];
-        (
-          node["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude);
-          way["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude);
-        );
-        out center 20;
-      ''';
+      // Use Overpass API for nearby search (free) - compact query format
+      final query = '[out:json][timeout:10];'
+          '(node["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude);'
+          'way["amenity"="$osmType"](around:$radiusMeters,$latitude,$longitude););'
+          'out center 20;';
 
-      final response = await _dio.post(
+      final response = await _dio.get(
         'https://overpass-api.de/api/interpreter',
-        data: query,
-        options: Options(contentType: 'text/plain'),
+        queryParameters: {'data': query},
       );
 
       if (response.statusCode == 200) {
-        final elements = response.data['elements'] as List;
+        final elements = response.data['elements'] as List? ?? [];
         return elements.map((e) => _parseOverpassElement(e)).toList();
       }
     } catch (e) {
@@ -229,6 +229,7 @@ class OsmService implements MapServiceInterface {
     LatLng? location,
     int radiusMeters = 50000,
   }) async {
+    // Try Photon first (faster), then fallback to Nominatim
     try {
       final params = <String, dynamic>{
         'q': input,
@@ -247,11 +248,28 @@ class OsmService implements MapServiceInterface {
 
       if (response.statusCode == 200) {
         final features = response.data['features'] as List;
-        return features.map((f) => _parsePhotonFeature(f)).toList();
+        if (features.isNotEmpty) {
+          return features.map((f) => _parsePhotonFeature(f)).toList();
+        }
       }
     } catch (e) {
-      print('Photon autocomplete failed: $e');
+      print('Photon autocomplete failed: $e, trying Nominatim...');
     }
+
+    // Fallback to Nominatim search (more reliable, CORS-friendly)
+    try {
+      final searchResults = await searchPlaces(input, nearLocation: location);
+      return searchResults.map((loc) => PlacePrediction(
+        placeId: loc.placeId ?? loc.id,
+        mainText: loc.name,
+        secondaryText: loc.address ?? '',
+        fullText: loc.address ?? loc.name,
+        source: LocationSource.openStreetMap,
+      )).toList();
+    } catch (e) {
+      print('Nominatim fallback also failed: $e');
+    }
+
     return [];
   }
 
@@ -345,5 +363,41 @@ class OsmService implements MapServiceInterface {
       default:
         return type;
     }
+  }
+
+  /// Decode Google-style polyline encoding (used by OSRM)
+  List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    int index = 0;
+    int lat = 0;
+    int lng = 0;
+
+    while (index < encoded.length) {
+      int shift = 0;
+      int result = 0;
+
+      // Decode latitude
+      int b;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lat += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+
+      // Decode longitude
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lng += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+
+      points.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+
+    return points;
   }
 }
