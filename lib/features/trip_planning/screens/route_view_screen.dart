@@ -9,6 +9,7 @@ import '../models/trip.dart';
 import '../models/day_plan.dart';
 import '../widgets/day_plan_card.dart';
 import '../widgets/route_map_widget.dart';
+import '../widgets/share_options_sheet.dart';
 
 class RouteViewScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -295,20 +296,31 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    '${day.totalDistanceKm.toStringAsFixed(0)} km',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${day.totalDistanceKm.toStringAsFixed(0)} km',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        '${day.stops.length} stops',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${day.stops.length} stops',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.share, size: 20),
+                    onPressed: () => _shareDay(day),
+                    tooltip: 'Share day ${index + 1}',
                   ),
                 ],
               ),
@@ -351,6 +363,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
                 },
               );
             },
+            onShare: () => _shareDay(dayPlan),
           ),
         ),
       ],
@@ -358,10 +371,11 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _shareTrip() {
-    // Implement trip sharing
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sharing feature coming soon!')),
-    );
+    ShareOptionsSheet.show(context, trip: _trip!);
+  }
+
+  void _shareDay(DayPlan dayPlan) {
+    ShareOptionsSheet.show(context, trip: _trip!, dayPlan: dayPlan);
   }
 
   String _formatDuration(int minutes) {

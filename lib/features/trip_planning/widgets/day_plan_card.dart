@@ -8,11 +8,13 @@ import '../models/amenity.dart';
 class DayPlanCard extends StatelessWidget {
   final DayPlan dayPlan;
   final Function(Amenity)? onAmenityTap;
+  final VoidCallback? onShare;
 
   const DayPlanCard({
     super.key,
     required this.dayPlan,
     this.onAmenityTap,
+    this.onShare,
   });
 
   @override
@@ -55,11 +57,25 @@ class DayPlanCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Text(
-                  DateFormat('EEE, MMM d').format(dayPlan.date),
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      DateFormat('EEE, MMM d').format(dayPlan.date),
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    if (onShare != null) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: Icon(Icons.share, size: 20, color: AppTheme.primaryColor),
+                        onPressed: onShare,
+                        tooltip: 'Share day route',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),
