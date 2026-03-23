@@ -174,15 +174,18 @@ class RouteOptimizer {
   }
 
   /// Get detailed route segments with directions
+  /// Set preferBetterRoutes=true to use Google Directions for better routes (costs money)
   Future<List<RouteSegment>> getRouteSegments(
-    List<TripLocation> optimizedRoute,
-  ) async {
+    List<TripLocation> optimizedRoute, {
+    bool preferBetterRoutes = false,
+  }) async {
     List<RouteSegment> segments = [];
 
     for (int i = 0; i < optimizedRoute.length - 1; i++) {
       final segment = await _mapService.getDirections(
         optimizedRoute[i],
         optimizedRoute[i + 1],
+        preferGoogleRouting: preferBetterRoutes,
       );
 
       if (segment != null) {

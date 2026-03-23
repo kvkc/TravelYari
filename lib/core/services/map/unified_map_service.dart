@@ -36,15 +36,8 @@ class UnifiedMapService {
 
   MapProvider _primaryProvider;
 
-  /// Check if an API key is actually configured (not placeholder)
-  static bool _isKeyConfigured(String key) {
-    return key.isNotEmpty &&
-           !key.startsWith('YOUR_') &&
-           key != 'YOUR_GOOGLE_MAPS_API_KEY';
-  }
-
-  /// Check if Google Maps has valid API key
-  static bool get hasGoogleKey => _isKeyConfigured(ApiKeys.googleMaps);
+  /// Check if Google Maps has valid API key (uses centralized check)
+  static bool get hasGoogleKey => ApiKeys.hasGoogleMapsKey;
 
   UnifiedMapService({
     required GoogleMapsService googleService,
@@ -142,15 +135,31 @@ class UnifiedMapService {
     return null;
   }
 
-  /// Get directions - ALWAYS use OSRM (FREE - biggest cost saver!)
-  /// Google Directions API costs $5/1000 requests - OSRM is free
+  /// Get directions - Default to OSRM (FREE) but allow Google for better routes
+  /// Google Directions API costs $5/1000 requests - OSRM is free but may give longer routes
+  /// Set preferGoogleRouting=true for more accurate/shorter routes at a cost
   Future<RouteSegment?> getDirections(
     TripLocation origin,
     TripLocation destination, {
     List<TripLocation>? waypoints,
-    MapProvider? provider,  // Ignored - always uses OSRM for cost savings
+    MapProvider? provider,
+    bool preferGoogleRouting = false,  // Set to true for better routes (costs money)
   }) async {
-    // Always use OSRM for directions - saves $5 per 1000 requests!
+    // If Google routing preferred AND key available, use Google first
+    if (preferGoogleRouting && hasGoogleKey) {
+      try {
+        final result = await _googleService.getDirections(
+          origin,
+          destination,
+          waypoints: waypoints,
+        ).timeout(const Duration(seconds: 10), onTimeout: () => null);
+        if (result != null) return result;
+      } catch (e) {
+        print('Google directions failed, falling back to OSRM: $e');
+      }
+    }
+
+    // Default: use OSRM for directions - saves $5 per 1000 requests!
     try {
       final result = await _osmService.getDirections(
         origin,

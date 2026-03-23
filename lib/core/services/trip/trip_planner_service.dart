@@ -83,8 +83,11 @@ class TripPlannerService {
     ).timeout(const Duration(seconds: 5), onTimeout: () => List.from(trip.locations));
 
     // Step 2: Get detailed route segments (with timeout)
-    final routeSegments = await _routeOptimizer.getRouteSegments(optimizedRoute)
-        .timeout(const Duration(seconds: 5), onTimeout: () => <RouteSegment>[]);
+    // Use Google Directions if user prefers better routes (and has key configured)
+    final routeSegments = await _routeOptimizer.getRouteSegments(
+      optimizedRoute,
+      preferBetterRoutes: prefs.preferBetterRoutes,
+    ).timeout(const Duration(seconds: 10), onTimeout: () => <RouteSegment>[]);
 
     // If no segments, create basic ones
     final segments = routeSegments.isEmpty
@@ -424,6 +427,7 @@ class TripPlannerService {
 
     // Add final day if there's remaining distance
     if (accumulatedDistance > 0 && dayStartLocation != null && lastLocation != null) {
+      // Final day - no stayOption needed as we're at destination
       dayPlans.add(DayPlan(
         dayNumber: dayNumber,
         date: currentDate,
@@ -433,6 +437,33 @@ class TripPlannerService {
         totalDurationMinutes: _estimateDuration(accumulatedDistance),
         stops: currentDayStops,
       ));
+    }
+
+    // Ensure all non-final days have stayOption (fill in missing ones)
+    if (dayPlans.length > 1 && preferences.findStayOptions) {
+      for (int i = 0; i < dayPlans.length - 1; i++) {
+        if (dayPlans[i].stayOption == null) {
+          // Try to find a stay option for this day
+          final stayOption = await _findStayOption(dayPlans[i].endLocation, preferences);
+          if (stayOption != null) {
+            dayPlans[i] = dayPlans[i].copyWith(stayOption: stayOption);
+          } else {
+            // Create a fallback stay suggestion based on end location
+            dayPlans[i] = dayPlans[i].copyWith(
+              stayOption: Amenity(
+                id: 'suggested_stay_day_${i + 1}',
+                name: 'Hotels near ${dayPlans[i].endLocation.name}',
+                type: AmenityType.hotel,
+                latitude: dayPlans[i].endLocation.latitude,
+                longitude: dayPlans[i].endLocation.longitude,
+                address: dayPlans[i].endLocation.address ?? 'Search for hotels in this area',
+                rating: null,
+                source: 'suggestion',
+              ),
+            );
+          }
+        }
+      }
     }
 
     return dayPlans;

@@ -187,7 +187,8 @@ class OsmService implements MapServiceInterface {
         '${destination.longitude},${destination.latitude}',
       ].join(';');
 
-      final url = '$_osrmBase/route/v1/driving/$coords?overview=full&geometries=polyline&steps=true';
+      // Request alternatives and annotations for better route selection
+      final url = '$_osrmBase/route/v1/driving/$coords?overview=full&geometries=polyline&steps=true&alternatives=true&annotations=distance,duration';
       final response = await _dio.get(_proxyUrl(url))
           .timeout(const Duration(seconds: 10));
 

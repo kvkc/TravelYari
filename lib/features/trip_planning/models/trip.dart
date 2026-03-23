@@ -158,6 +158,7 @@ class TripPreferences {
   final bool findStayOptions;
   final double minHotelRating;
   final bool autoOptimize; // Auto-optimize route when locations change
+  final bool preferBetterRoutes; // Use Google Directions for better routes (costs API usage)
 
   TripPreferences({
     this.maxDailyDistanceKm = 450,
@@ -171,6 +172,7 @@ class TripPreferences {
     this.findStayOptions = true,
     this.minHotelRating = 3.5,
     this.autoOptimize = true,
+    this.preferBetterRoutes = false, // Off by default to save costs
   });
 
   TripPreferences copyWith({
@@ -185,6 +187,7 @@ class TripPreferences {
     bool? findStayOptions,
     double? minHotelRating,
     bool? autoOptimize,
+    bool? preferBetterRoutes,
   }) {
     return TripPreferences(
       maxDailyDistanceKm: maxDailyDistanceKm ?? this.maxDailyDistanceKm,
@@ -198,6 +201,7 @@ class TripPreferences {
       findStayOptions: findStayOptions ?? this.findStayOptions,
       minHotelRating: minHotelRating ?? this.minHotelRating,
       autoOptimize: autoOptimize ?? this.autoOptimize,
+      preferBetterRoutes: preferBetterRoutes ?? this.preferBetterRoutes,
     );
   }
 
@@ -214,6 +218,7 @@ class TripPreferences {
       'findStayOptions': findStayOptions,
       'minHotelRating': minHotelRating,
       'autoOptimize': autoOptimize,
+      'preferBetterRoutes': preferBetterRoutes,
     };
   }
 
@@ -230,6 +235,7 @@ class TripPreferences {
       findStayOptions: json['findStayOptions'] ?? true,
       minHotelRating: (json['minHotelRating'] ?? 3.5).toDouble(),
       autoOptimize: json['autoOptimize'] ?? true,
+      preferBetterRoutes: json['preferBetterRoutes'] ?? false,
     );
   }
 }

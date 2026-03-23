@@ -115,7 +115,7 @@ class LocationListItem extends StatelessWidget {
                     ReorderableDragStartListener(
                       index: index,
                       child: Container(
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(6),
                         child: Icon(
                           Icons.drag_indicator,
                           color: Colors.grey[400],
@@ -124,7 +124,7 @@ class LocationListItem extends StatelessWidget {
                       ),
                     ),
 
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
 
                     // Location info (takes remaining space)
                     Expanded(
@@ -183,23 +183,23 @@ class LocationListItem extends StatelessWidget {
                       ),
                     ),
 
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
 
                     // Remove button on the right
                     Material(
                       color: Colors.transparent,
                       child: InkWell(
                         onTap: onRemove,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
                         child: Container(
-                          padding: const EdgeInsets.all(6),
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                             color: Colors.red.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                           child: Icon(
                             Icons.close,
-                            size: 16,
+                            size: 18,
                             color: Colors.red[400],
                           ),
                         ),

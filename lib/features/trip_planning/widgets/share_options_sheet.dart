@@ -40,7 +40,7 @@ class ShareOptionsSheet extends StatelessWidget {
         : trip.name;
 
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
