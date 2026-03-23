@@ -1,141 +1,165 @@
 # Yatra Planner
 
-A smart trip planning app built with Flutter for Android and iOS. Plan multi-location trips with optimized routes, find amenities along the way, and get recommendations for places with good facilities.
+A smart road trip planning app built with Flutter. Plan multi-location trips with optimized routes, day-by-day itineraries, and find amenities along the way.
 
 ## Features
 
-- **Multi-location trips**: Add as many destinations as you want
-- **Shared location support**: Accept locations shared from WhatsApp, Google Maps, and other apps
-- **Multiple map providers**: Google Maps, Mappls (MapMyIndia), and Bhuvan (ISRO)
-- **Route optimization**: Automatically find the most efficient path through all locations
-- **Smart amenity suggestions**:
-  - Petrol stations and EV charging points
-  - Restaurants with ratings above 4.0
-  - Hotels and stay options
-  - Tea/coffee stalls for short breaks
-- **Washroom quality ratings**: Prioritize stops with clean facilities, especially female-friendly ones
-- **Daily trip planning**:
-  - 400-500 km daily driving limits
-  - Break suggestions every 100-150 km
-  - Overnight stay recommendations for long trips
+- **Multi-location trips**: Add unlimited destinations with drag-to-reorder
+- **Route optimization**: TSP algorithm finds the most efficient path
+- **Day-by-day planning**: Automatic multi-day splitting with realistic driving limits
+- **Smart stops**:
+  - Break stops every ~125 km
+  - Fuel/EV charging stations
+  - Restaurant recommendations
+  - Hotel suggestions for overnight stays
+- **Hybrid map service**: Google Maps + OpenStreetMap for cost optimization
+- **Share trips**: Export to Google Maps, WhatsApp, or any app
+- **Washroom quality**: Prioritize stops with clean facilities
 
-## Setup
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Framework | Flutter 3.2+ |
+| State Management | Riverpod |
+| Maps | Google Maps + OSM (hybrid) |
+| Routing | OSRM (free) |
+| Storage | Hive |
+
+## Quick Start
 
 ### Prerequisites
 
-1. Install Flutter SDK (3.2.0 or higher)
-2. Set up Android Studio / Xcode for mobile development
+- Flutter SDK 3.2.0+
+- Android Studio / VS Code
+- Google Maps API key (optional but recommended)
 
-### API Keys
+### Installation
 
-You need to obtain API keys for the following services:
+```bash
+# Clone the repository
+git clone https://github.com/kvkc/TravelYari.git
+cd TravelYari
 
-1. **Google Maps Platform**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Enable Maps SDK for Android, Maps SDK for iOS, Places API, Directions API
-   - Create an API key
-
-2. **Mappls (MapMyIndia)**
-   - Register at [Mappls API](https://about.mappls.com/api/)
-   - Get your API key, Client ID, and Client Secret
-
-3. **Bhuvan (ISRO)** (Optional)
-   - Register at [Bhuvan Portal](https://bhuvan.nrsc.gov.in/)
-   - Request API access
-
-### Configuration
-
-1. Update API keys in `lib/core/services/api_keys.dart`:
-
-```dart
-class ApiKeys {
-  static const String googleMaps = 'YOUR_GOOGLE_MAPS_API_KEY';
-  static const String mappls = 'YOUR_MAPPLS_API_KEY';
-  static const String mapplsClientId = 'YOUR_MAPPLS_CLIENT_ID';
-  static const String mapplsClientSecret = 'YOUR_MAPPLS_CLIENT_SECRET';
-  static const String bhuvan = 'YOUR_BHUVAN_API_KEY';
-}
+# Install dependencies
+flutter pub get
 ```
-
-2. Update Android manifest (`android/app/src/main/AndroidManifest.xml`):
-   - Replace `YOUR_GOOGLE_MAPS_API_KEY` with your actual key
-
-3. Update iOS Info.plist (`ios/Runner/Info.plist`):
-   - Replace `YOUR_GOOGLE_MAPS_API_KEY` with your actual key
 
 ### Running the App
 
 ```bash
-# Get dependencies
-flutter pub get
-
-# Run on connected device
+# Without Google Maps key (uses OSM only)
 flutter run
 
-# Build for Android
-flutter build apk --release
-
-# Build for iOS
-flutter build ios --release
+# With Google Maps key (recommended)
+flutter run --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY
 ```
+
+### Building for Release
+
+```bash
+# APK
+flutter build apk --release --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY
+
+# App Bundle (Play Store)
+flutter build appbundle --release --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY
+```
+
+## API Key Setup (Optional)
+
+The app works without any API keys using free OpenStreetMap services. For better search/autocomplete, add a Google Maps key:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project and enable:
+   - Maps SDK for Android
+   - Places API
+   - Directions API (optional)
+   - Geocoding API
+3. Create an API key with Android restrictions:
+   - Package: `com.yatraplanner.app`
+   - SHA-1 fingerprints (see below)
+
+### Getting SHA-1 Fingerprints
+
+```bash
+# Debug
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android
+
+# Release
+keytool -list -v -keystore android/yatra-release.jks -alias yatra
+```
+
+## Cost Optimization
+
+The app uses a hybrid approach to minimize API costs:
+
+| Service | Provider | Cost |
+|---------|----------|------|
+| Search/Autocomplete | Google (if key) or OSM | $2.83/1000 or Free |
+| Routing | OSRM | Free |
+| Distance Matrix | OSRM | Free |
+| Nearby Search | OSM | Free |
+| Reverse Geocode | OSM | Free |
+
+**Estimated monthly cost**: ~$25-50 for 100 users/day (vs $500+ with Google only)
 
 ## Project Structure
 
 ```
 lib/
-├── app/                    # App configuration
+├── app/                    # App entry point
 ├── core/
-│   ├── router/            # Navigation
+│   ├── router/             # Navigation
 │   ├── services/
-│   │   ├── amenities/     # Amenity finding services
-│   │   ├── map/           # Map provider integrations
-│   │   ├── route/         # Route optimization
-│   │   └── trip/          # Trip planning logic
-│   └── theme/             # App theming
+│   │   ├── api_keys.dart   # Secure key injection
+│   │   ├── amenities/      # Hotels, fuel, restaurants
+│   │   ├── map/            # Google, OSM, unified service
+│   │   ├── route/          # TSP optimization
+│   │   ├── share/          # Share to WhatsApp, Maps
+│   │   └── trip/           # Day planning logic
+│   └── theme/              # App theming
 └── features/
-    ├── amenities/         # Amenity browsing screens
-    ├── home/              # Home screen
-    ├── location_search/   # Location search UI
-    ├── settings/          # App settings
-    ├── shared_location/   # Handle shared locations
-    └── trip_planning/     # Trip planning screens & models
+    ├── home/               # Trip list
+    ├── location_search/    # Place autocomplete
+    ├── settings/           # API keys config
+    ├── shared_location/    # Deep link handling
+    └── trip_planning/      # Main planning UI
+        ├── models/         # Trip, Location, DayPlan
+        ├── screens/        # Planning & route view
+        └── widgets/        # Cards, lists, maps
 ```
 
 ## Key Components
 
-### Map Services
-- `UnifiedMapService`: Unified interface to switch between Google Maps, Mappls, and Bhuvan
-- Automatic fallback if one provider fails
+### Hybrid Map Service
+- **Search**: Google Places (if key) → OSM Photon fallback
+- **Routing**: Always OSRM (free)
+- **Nearby**: Always OSM Overpass (free)
 
 ### Route Optimization
-- Uses Nearest Neighbor algorithm for initial solution
-- 2-opt optimization for route improvement
-- Considers road distances when available
+- Nearest Neighbor heuristic for initial solution
+- 2-opt optimization for improvement
+- Road distance matrix via OSRM
 
-### Amenity Finding
-- Searches along the route at regular intervals
-- Filters by rating and washroom quality
-- Analyzes reviews for washroom-related feedback
+### Day Planning
+- Splits long trips into realistic daily segments
+- Adds break stops every ~125 km
+- Finds hotels for overnight stays
+- Supports fuel and EV charging stops
 
-### Shared Location Handling
-- Parses Google Maps URLs, coordinates, place names
-- Handles WhatsApp location shares
-- Supports geo: URIs
+## Trip Preferences
 
-## Customization
+| Setting | Default | Range |
+|---------|---------|-------|
+| Max daily distance | 450 km | 200-700 km |
+| Break interval | 125 km | 50-200 km |
+| Break duration | 10 min | 5-30 min |
+| Min hotel rating | 3.5 | 1-5 |
+| Prefer better routes | Off | Uses Google Directions |
 
-### Trip Preferences
-Users can customize:
-- Maximum daily driving distance (200-700 km)
-- Break interval (50-200 km)
-- Break duration (5-30 minutes)
-- Minimum restaurant rating
-- Washroom quality preference
+## Documentation
 
-### Vehicle Types
-- Car
-- Bike
-- EV (auto-enables EV charging station search)
+See [BUILD_GUIDE.md](BUILD_GUIDE.md) for detailed implementation guide.
 
 ## License
 
