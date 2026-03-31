@@ -4,17 +4,22 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../models/day_plan.dart';
 import '../models/amenity.dart';
+import '../models/location.dart';
 
 class DayPlanCard extends StatelessWidget {
   final DayPlan dayPlan;
   final Function(Amenity)? onAmenityTap;
   final VoidCallback? onShare;
+  final Function(Amenity)? onStayTap;
+  final Function(PlannedStop stop, int stopIndex)? onStopEdit;
 
   const DayPlanCard({
     super.key,
     required this.dayPlan,
     this.onAmenityTap,
     this.onShare,
+    this.onStayTap,
+    this.onStopEdit,
   });
 
   @override
@@ -130,6 +135,8 @@ class DayPlanCard extends StatelessWidget {
   }
 
   Widget _buildStopItem(PlannedStop stop, int index) {
+    final isEditable = _isEditableStop(stop.type);
+
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -177,9 +184,13 @@ class DayPlanCard extends StatelessWidget {
             child: Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: InkWell(
-                onTap: stop.amenity != null
-                    ? () => onAmenityTap?.call(stop.amenity!)
-                    : null,
+                onTap: () {
+                  if (isEditable && onStopEdit != null) {
+                    onStopEdit!(stop, index);
+                  } else if (stop.amenity != null) {
+                    onAmenityTap?.call(stop.amenity!);
+                  }
+                },
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -196,6 +207,14 @@ class DayPlanCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (isEditable && onStopEdit != null) ...[
+                            Icon(
+                              Icons.edit_outlined,
+                              size: 14,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(width: 8),
+                          ],
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -293,76 +312,104 @@ class DayPlanCard extends StatelessWidget {
     );
   }
 
+  bool _isEditableStop(StopType type) {
+    return type == StopType.teaBreak ||
+        type == StopType.fuelStop ||
+        type == StopType.mealBreak ||
+        type == StopType.restStop;
+  }
+
   Widget _buildStayOption() {
     final stay = dayPlan.stayOption!;
 
     return Card(
       color: AppTheme.secondaryColor.withOpacity(0.1),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.hotel,
-                  color: AppTheme.secondaryColor,
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Recommended Stay',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
+      child: InkWell(
+        onTap: onStayTap != null ? () => onStayTap!(stay) : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.hotel,
+                    color: AppTheme.secondaryColor,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              stay.name,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (stay.address != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                stay.address!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                if (stay.rating != null) ...[
-                  Icon(Icons.star, size: 16, color: Colors.amber),
-                  const SizedBox(width: 4),
-                  Text(
-                    stay.rating!.toStringAsFixed(1),
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(width: 16),
-                ],
-                if (stay.hasGoodWashroom) ...[
-                  Icon(Icons.wc, size: 16, color: AppTheme.successColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Clean facilities',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.successColor,
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Recommended Stay',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
+                  if (onStayTap != null)
+                    Icon(
+                      Icons.edit_outlined,
+                      size: 18,
+                      color: AppTheme.secondaryColor,
+                    ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                stay.name,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (stay.address != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  stay.address!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
               ],
-            ),
-          ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  if (stay.rating != null) ...[
+                    Icon(Icons.star, size: 16, color: Colors.amber),
+                    const SizedBox(width: 4),
+                    Text(
+                      stay.rating!.toStringAsFixed(1),
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(width: 16),
+                  ],
+                  if (stay.hasGoodWashroom) ...[
+                    Icon(Icons.wc, size: 16, color: AppTheme.successColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Clean facilities',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.successColor,
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  if (onStayTap != null)
+                    Text(
+                      'Tap to edit',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.secondaryColor,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

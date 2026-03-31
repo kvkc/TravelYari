@@ -236,6 +236,10 @@ class TripPlannerService {
           final breakInterval = preferences.breakIntervalKm;
           int numBreaks = (distancePerDay / breakInterval).floor();
           if (numBreaks > 0) {
+            // Estimate start time for the day (default 8 AM if no specific time)
+            final dayStartTime = DateTime(currentDate.year, currentDate.month, currentDate.day, 8, 0);
+            final avgSpeed = 50.0; // km/h average
+
             for (int b = 1; b <= numBreaks && b <= 3; b++) {
               final breakFraction = prevFraction + (fraction - prevFraction) * (b / (numBreaks + 1));
               final breakLat = segment.start.latitude +
@@ -243,16 +247,24 @@ class TripPlannerService {
               final breakLng = segment.start.longitude +
                   (segment.end.longitude - segment.start.longitude) * breakFraction;
 
+              // Calculate distance covered to this break
+              final distanceToBreak = distancePerDay * (b / (numBreaks + 1));
+              final estimatedArrival = _estimateArrivalTime(dayStartTime, distanceToBreak, avgSpeed);
+              final isMealBreak = _isMealTime(estimatedArrival);
+              final breakType = _determineBreakType(estimatedArrival, preferences.breakDurationMinutes);
+              final breakDuration = isMealBreak ? 45 : preferences.breakDurationMinutes;
+
               stops.add(PlannedStop(
                 location: TripLocation(
-                  name: 'Tea/Rest Break ${b}',
+                  name: isMealBreak ? 'Meal Break ${b}' : 'Tea/Rest Break ${b}',
                   latitude: breakLat,
                   longitude: breakLng,
                   source: LocationSource.openStreetMap,
                 ),
-                type: StopType.teaBreak,
-                plannedDurationMinutes: preferences.breakDurationMinutes,
+                type: breakType,
+                plannedDurationMinutes: breakDuration,
                 distanceFromPreviousKm: breakInterval,
+                estimatedArrival: estimatedArrival,
               ));
             }
           }
@@ -372,6 +384,10 @@ class TripPlannerService {
       final breakInterval = preferences.breakIntervalKm;
       if (segment.distanceKm > breakInterval) {
         final numBreaks = (segment.distanceKm / breakInterval).floor();
+        // Estimate start time for the day (default 8 AM if no specific time)
+        final dayStartTime = DateTime(currentDate.year, currentDate.month, currentDate.day, 8, 0);
+        final avgSpeed = 50.0; // km/h average
+
         for (int b = 1; b <= numBreaks && b <= 2; b++) {
           final breakFraction = b / (numBreaks + 1);
           final breakLat = segment.start.latitude +
@@ -379,16 +395,24 @@ class TripPlannerService {
           final breakLng = segment.start.longitude +
               (segment.end.longitude - segment.start.longitude) * breakFraction;
 
+          // Calculate estimated arrival at this break
+          final distanceToBreak = accumulatedDistance + (segment.distanceKm * breakFraction);
+          final estimatedArrival = _estimateArrivalTime(dayStartTime, distanceToBreak, avgSpeed);
+          final isMealBreak = _isMealTime(estimatedArrival);
+          final breakType = _determineBreakType(estimatedArrival, preferences.breakDurationMinutes);
+          final breakDuration = isMealBreak ? 45 : preferences.breakDurationMinutes;
+
           currentDayStops.add(PlannedStop(
             location: TripLocation(
-              name: 'Tea/Rest Break',
+              name: isMealBreak ? 'Meal Break' : 'Tea/Rest Break',
               latitude: breakLat,
               longitude: breakLng,
               source: LocationSource.openStreetMap,
             ),
-            type: StopType.teaBreak,
-            plannedDurationMinutes: preferences.breakDurationMinutes,
+            type: breakType,
+            plannedDurationMinutes: breakDuration,
             distanceFromPreviousKm: segment.distanceKm * breakFraction,
+            estimatedArrival: estimatedArrival,
           ));
         }
       }
@@ -469,13 +493,42 @@ class TripPlannerService {
     return dayPlans;
   }
 
-  /// Find a suitable break stop (tea/coffee stall)
+  /// Find a suitable break stop (tea/coffee stall or restaurant for meals)
   Future<PlannedStop?> _findBreakStop(
     LatLng location,
     StopType type,
-    TripPreferences preferences,
-  ) async {
+    TripPreferences preferences, {
+    DateTime? estimatedArrival,
+  }) async {
     try {
+      final isMealTime = estimatedArrival != null && _isMealTime(estimatedArrival);
+      final actualType = isMealTime ? StopType.mealBreak : type;
+
+      final amenity = await _amenitiesService.findBreakStop(
+        location: location,
+        isMealTime: isMealTime,
+        minRating: isMealTime ? preferences.minRestaurantRating : 3.5,
+        searchRadiusKm: isMealTime ? 5.0 : 2.0,
+        preferGoodWashrooms: preferences.preferGoodWashrooms,
+      );
+
+      if (amenity != null) {
+        return PlannedStop(
+          location: TripLocation(
+            name: amenity.name,
+            address: amenity.address,
+            latitude: amenity.latitude,
+            longitude: amenity.longitude,
+            source: LocationSource.openStreetMap,
+          ),
+          amenity: amenity,
+          type: actualType,
+          plannedDurationMinutes: isMealTime ? 45 : preferences.breakDurationMinutes,
+          estimatedArrival: estimatedArrival,
+        );
+      }
+
+      // Fallback to basic tea stall search
       final teaStalls = await _amenitiesService.findTeaStalls(
         routePoints: [location],
         searchRadiusKm: 2.0,
@@ -500,11 +553,12 @@ class TripPlannerService {
             address: selected.address,
             latitude: selected.latitude,
             longitude: selected.longitude,
-            source: LocationSource.googleMaps,
+            source: LocationSource.openStreetMap,
           ),
           amenity: selected,
-          type: type,
-          plannedDurationMinutes: preferences.breakDurationMinutes,
+          type: actualType,
+          plannedDurationMinutes: isMealTime ? 45 : preferences.breakDurationMinutes,
+          estimatedArrival: estimatedArrival,
         );
       }
     } catch (e) {
@@ -594,6 +648,35 @@ class TripPlannerService {
   int _estimateDuration(double distanceKm) {
     // Assume average speed of 50 km/h including breaks
     return (distanceKm / 50 * 60).round();
+  }
+
+  /// Determine if a given time is during typical meal hours
+  bool _isMealTime(DateTime time) {
+    final hour = time.hour;
+    // Lunch: 12:00 PM - 2:00 PM
+    // Dinner: 7:00 PM - 9:00 PM
+    return (hour >= 12 && hour <= 14) || (hour >= 19 && hour <= 21);
+  }
+
+  /// Determine the appropriate break type based on time of day and duration
+  StopType _determineBreakType(DateTime estimatedArrival, int durationMinutes) {
+    final isMealHours = _isMealTime(estimatedArrival);
+    final isLongBreak = durationMinutes >= 30;
+
+    if (isMealHours || isLongBreak) {
+      return StopType.mealBreak;
+    }
+    return StopType.teaBreak;
+  }
+
+  /// Calculate estimated arrival time at a stop
+  DateTime _estimateArrivalTime(
+    DateTime startTime,
+    double distanceKm,
+    double avgSpeedKmh,
+  ) {
+    final durationMinutes = (distanceKm / avgSpeedKmh * 60).round();
+    return startTime.add(Duration(minutes: durationMinutes));
   }
 
   /// Suggest meal stops for a day plan

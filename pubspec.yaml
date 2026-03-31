@@ -38,9 +38,16 @@ dependencies:
   cached_network_image: ^3.3.1
   flutter_rating_bar: ^4.0.1
 
-  # Authentication
+  # Authentication & Firebase
   google_sign_in: ^6.2.1
   flutter_secure_storage: ^9.0.0
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.16.0
+  cloud_firestore: ^4.14.0
+  firebase_messaging: ^14.7.9
+
+  # Contacts
+  flutter_contacts: ^1.1.7+1
 
   # Deep Links & Sharing
   receive_sharing_intent: ^1.6.7

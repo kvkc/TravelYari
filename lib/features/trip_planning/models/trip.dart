@@ -16,6 +16,79 @@ enum VehicleType {
   ev,
 }
 
+enum ParticipantRole {
+  owner,
+  editor,
+  viewer,
+}
+
+class TripParticipant {
+  final String id;
+  final String? userId;
+  final String? name;
+  final String? phone;
+  final String? email;
+  final ParticipantRole role;
+  final DateTime joinedAt;
+
+  TripParticipant({
+    required this.id,
+    this.userId,
+    this.name,
+    this.phone,
+    this.email,
+    this.role = ParticipantRole.editor,
+    DateTime? joinedAt,
+  }) : joinedAt = joinedAt ?? DateTime.now();
+
+  TripParticipant copyWith({
+    String? userId,
+    String? name,
+    String? phone,
+    String? email,
+    ParticipantRole? role,
+  }) {
+    return TripParticipant(
+      id: id,
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      role: role ?? this.role,
+      joinedAt: joinedAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'userId': userId,
+      'name': name,
+      'phone': phone,
+      'email': email,
+      'role': role.name,
+      'joinedAt': joinedAt.toIso8601String(),
+    };
+  }
+
+  factory TripParticipant.fromJson(Map<String, dynamic> json) {
+    return TripParticipant(
+      id: json['id'],
+      userId: json['userId'],
+      name: json['name'],
+      phone: json['phone'],
+      email: json['email'],
+      role: ParticipantRole.values.firstWhere(
+        (e) => e.name == json['role'],
+        orElse: () => ParticipantRole.editor,
+      ),
+      joinedAt: json['joinedAt'] != null
+          ? DateTime.parse(json['joinedAt'])
+          : DateTime.now(),
+    );
+  }
+}
+
 class Trip {
   final String id;
   final String name;
@@ -31,6 +104,14 @@ class Trip {
   final DateTime createdAt;
   final DateTime updatedAt;
   final TripPreferences preferences;
+  // Collaboration fields
+  final String? ownerId;
+  final List<TripParticipant> participants;
+  final List<String> participantIds;
+  final String? shareCode;
+  final bool isShared;
+  final DateTime? lastSyncedAt;
+  final String? lastModifiedBy;
 
   Trip({
     String? id,
@@ -47,6 +128,13 @@ class Trip {
     DateTime? createdAt,
     DateTime? updatedAt,
     TripPreferences? preferences,
+    this.ownerId,
+    List<TripParticipant>? participants,
+    List<String>? participantIds,
+    this.shareCode,
+    this.isShared = false,
+    this.lastSyncedAt,
+    this.lastModifiedBy,
   })  : id = id ?? const Uuid().v4(),
         locations = locations ?? [],
         optimizedRoute = optimizedRoute ?? [],
@@ -54,7 +142,9 @@ class Trip {
         dayPlans = dayPlans ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now(),
-        preferences = preferences ?? TripPreferences();
+        preferences = preferences ?? TripPreferences(),
+        participants = participants ?? [],
+        participantIds = participantIds ?? [];
 
   Trip copyWith({
     String? name,
@@ -68,6 +158,13 @@ class Trip {
     int? estimatedDurationMinutes,
     DateTime? startDate,
     TripPreferences? preferences,
+    String? ownerId,
+    List<TripParticipant>? participants,
+    List<String>? participantIds,
+    String? shareCode,
+    bool? isShared,
+    DateTime? lastSyncedAt,
+    String? lastModifiedBy,
   }) {
     return Trip(
       id: id,
@@ -84,6 +181,13 @@ class Trip {
       createdAt: createdAt,
       updatedAt: DateTime.now(),
       preferences: preferences ?? this.preferences,
+      ownerId: ownerId ?? this.ownerId,
+      participants: participants ?? this.participants,
+      participantIds: participantIds ?? this.participantIds,
+      shareCode: shareCode ?? this.shareCode,
+      isShared: isShared ?? this.isShared,
+      lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      lastModifiedBy: lastModifiedBy ?? this.lastModifiedBy,
     );
   }
 
@@ -103,6 +207,13 @@ class Trip {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'preferences': preferences.toJson(),
+      'ownerId': ownerId,
+      'participants': participants.map((p) => p.toJson()).toList(),
+      'participantIds': participantIds,
+      'shareCode': shareCode,
+      'isShared': isShared,
+      'lastSyncedAt': lastSyncedAt?.toIso8601String(),
+      'lastModifiedBy': lastModifiedBy,
     };
   }
 
@@ -142,6 +253,21 @@ class Trip {
       preferences: json['preferences'] != null
           ? TripPreferences.fromJson(Map<String, dynamic>.from(json['preferences']))
           : TripPreferences(),
+      ownerId: json['ownerId'],
+      participants: (json['participants'] as List?)
+              ?.map((p) => TripParticipant.fromJson(Map<String, dynamic>.from(p)))
+              .toList() ??
+          [],
+      participantIds: (json['participantIds'] as List?)
+              ?.map((id) => id.toString())
+              .toList() ??
+          [],
+      shareCode: json['shareCode'],
+      isShared: json['isShared'] ?? false,
+      lastSyncedAt: json['lastSyncedAt'] != null
+          ? DateTime.parse(json['lastSyncedAt'])
+          : null,
+      lastModifiedBy: json['lastModifiedBy'],
     );
   }
 }

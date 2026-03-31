@@ -31,6 +31,7 @@ class DayPlan {
     int? totalDurationMinutes,
     List<PlannedStop>? stops,
     Amenity? stayOption,
+    bool clearStayOption = false,
   }) {
     return DayPlan(
       dayNumber: dayNumber ?? this.dayNumber,
@@ -40,7 +41,7 @@ class DayPlan {
       totalDistanceKm: totalDistanceKm ?? this.totalDistanceKm,
       totalDurationMinutes: totalDurationMinutes ?? this.totalDurationMinutes,
       stops: stops ?? this.stops,
-      stayOption: stayOption ?? this.stayOption,
+      stayOption: clearStayOption ? null : (stayOption ?? this.stayOption),
     );
   }
 

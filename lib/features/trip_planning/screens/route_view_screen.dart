@@ -4,12 +4,18 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/sync/trip_sync_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../models/trip.dart';
 import '../models/day_plan.dart';
+import '../models/amenity.dart';
 import '../widgets/day_plan_card.dart';
 import '../widgets/route_map_widget.dart';
 import '../widgets/share_options_sheet.dart';
+import '../widgets/edit_stay_sheet.dart';
+import '../widgets/stay_options_list.dart';
+import '../widgets/edit_break_sheet.dart';
+import '../widgets/sync_indicator_widget.dart';
 
 class RouteViewScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -86,6 +92,12 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
           },
         ),
         actions: [
+          const SyncStatusIndicator(),
+          IconButton(
+            icon: const Icon(Icons.group_add),
+            onPressed: _inviteParticipants,
+            tooltip: 'Invite participants',
+          ),
           IconButton(
             icon: const Icon(Icons.share),
             onPressed: _shareTrip,
@@ -108,6 +120,12 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   Widget _buildOverviewTab() {
     return Column(
       children: [
+        // Sync indicator banner
+        SyncIndicatorWidget(
+          tripId: _trip!.id,
+          onRefresh: _refreshFromCloud,
+        ),
+
         // Map showing full route
         Expanded(
           flex: 2,
@@ -339,6 +357,8 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   Widget _buildDayTab(DayPlan dayPlan) {
+    final dayIndex = _trip!.dayPlans.indexOf(dayPlan);
+
     return Column(
       children: [
         // Map showing day's route
@@ -368,14 +388,159 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
               );
             },
             onShare: () => _shareDay(dayPlan),
+            onStayTap: (stay) => _handleStayTap(stay, dayIndex),
+            onStopEdit: (stop, stopIndex) => _handleStopEdit(stop, stopIndex, dayIndex),
           ),
         ),
       ],
     );
   }
 
+  void _handleStayTap(Amenity stay, int dayIndex) {
+    EditStaySheet.show(
+      context,
+      stay: stay,
+      onChangeStay: () => _changeStay(dayIndex),
+      onRemoveStay: () => _removeStay(dayIndex),
+    );
+  }
+
+  Future<void> _changeStay(int dayIndex) async {
+    final dayPlan = _trip!.dayPlans[dayIndex];
+    final newStay = await StayOptionsSheet.show(
+      context,
+      location: dayPlan.endLocation,
+      currentStay: dayPlan.stayOption,
+    );
+
+    if (newStay != null && mounted) {
+      _updateDayPlanStay(dayIndex, newStay);
+    }
+  }
+
+  void _removeStay(int dayIndex) {
+    _updateDayPlanStay(dayIndex, null);
+  }
+
+  void _updateDayPlanStay(int dayIndex, Amenity? newStay) {
+    final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
+    updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
+      stayOption: newStay,
+      clearStayOption: newStay == null,
+    );
+
+    final updatedTrip = _trip!.copyWith(dayPlans: updatedDayPlans);
+    _saveAndUpdateTrip(updatedTrip);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(newStay != null ? 'Stay updated' : 'Stay removed'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _handleStopEdit(PlannedStop stop, int stopIndex, int dayIndex) {
+    EditBreakSheet.show(
+      context,
+      stop: stop,
+      onUpdate: (updatedStop) => _updateStop(dayIndex, stopIndex, updatedStop),
+      onChangeLocation: () => _changeStopLocation(dayIndex, stopIndex),
+      onRemove: () => _removeStop(dayIndex, stopIndex),
+    );
+  }
+
+  void _updateStop(int dayIndex, int stopIndex, PlannedStop updatedStop) {
+    final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
+    final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
+    updatedStops[stopIndex] = updatedStop;
+
+    updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
+      stops: updatedStops,
+    );
+
+    final updatedTrip = _trip!.copyWith(dayPlans: updatedDayPlans);
+    _saveAndUpdateTrip(updatedTrip);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Stop updated'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _changeStopLocation(int dayIndex, int stopIndex) async {
+    // Navigate to location search for the break
+    final result = await Navigator.pushNamed(
+      context,
+      AppRouter.locationSearch,
+      arguments: {'returnLocation': true},
+    );
+
+    if (result != null && result is Map && mounted) {
+      final location = result['location'];
+      if (location != null) {
+        final currentStop = _trip!.dayPlans[dayIndex].stops[stopIndex];
+        final updatedStop = currentStop.copyWith(
+          location: location,
+        );
+        _updateStop(dayIndex, stopIndex, updatedStop);
+      }
+    }
+  }
+
+  void _removeStop(int dayIndex, int stopIndex) {
+    final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
+    final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
+    updatedStops.removeAt(stopIndex);
+
+    updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
+      stops: updatedStops,
+    );
+
+    final updatedTrip = _trip!.copyWith(dayPlans: updatedDayPlans);
+    _saveAndUpdateTrip(updatedTrip);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Stop removed'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _saveAndUpdateTrip(Trip updatedTrip) async {
+    await StorageService.saveTrip(updatedTrip);
+    setState(() {
+      _trip = updatedTrip;
+    });
+  }
+
   void _shareTrip() {
     ShareOptionsSheet.show(context, trip: _trip!);
+  }
+
+  void _inviteParticipants() {
+    Navigator.pushNamed(
+      context,
+      AppRouter.inviteParticipants,
+      arguments: {'trip': _trip},
+    );
+  }
+
+  Future<void> _refreshFromCloud() async {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    final refreshedTrip = await syncService.refreshTrip(_trip!.id);
+
+    if (refreshedTrip != null && mounted) {
+      setState(() {
+        _trip = refreshedTrip;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Trip updated')),
+      );
+    }
   }
 
   void _shareDay(DayPlan dayPlan) {

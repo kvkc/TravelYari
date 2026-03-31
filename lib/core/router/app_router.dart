@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/trip_planning/screens/trip_planning_screen.dart';
 import '../../features/trip_planning/screens/route_view_screen.dart';
+import '../../features/trip_planning/models/trip.dart';
 import '../../features/trip_planning/models/location.dart';
 import '../../features/location_search/screens/location_search_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
 import '../../features/settings/screens/api_keys_screen.dart';
 import '../../features/amenities/screens/amenities_screen.dart';
+import '../../features/collaboration/screens/invite_participants_screen.dart';
 
 class AppRouter {
   static const String home = '/';
@@ -17,6 +19,7 @@ class AppRouter {
   static const String settings = '/settings';
   static const String apiKeys = '/api-keys';
   static const String amenities = '/amenities';
+  static const String inviteParticipants = '/invite-participants';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -60,6 +63,13 @@ class AppRouter {
           builder: (_) => AmenitiesScreen(
             tripId: args['tripId'],
             amenityType: args['amenityType'],
+          ),
+        );
+      case inviteParticipants:
+        final args = settings.arguments as Map<String, dynamic>;
+        return MaterialPageRoute(
+          builder: (_) => InviteParticipantsScreen(
+            trip: args['trip'] as Trip,
           ),
         );
       default:

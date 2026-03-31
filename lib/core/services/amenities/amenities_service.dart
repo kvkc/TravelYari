@@ -97,6 +97,115 @@ class AmenitiesService {
     );
   }
 
+  /// Find good meal/dining locations for meal breaks
+  /// Searches for restaurants with good ratings and food quality
+  Future<List<Amenity>> findMealBreakLocations({
+    required LatLng location,
+    double minRating = 3.5,
+    double searchRadiusKm = 5.0,
+    int maxResults = 10,
+    bool preferGoodWashrooms = true,
+  }) async {
+    try {
+      // Search for restaurants
+      final places = await _mapService.searchNearby(
+        location.latitude,
+        location.longitude,
+        type: 'restaurant',
+        radiusMeters: (searchRadiusKm * 1000).round(),
+      ).timeout(_timeout * 2, onTimeout: () => <TripLocation>[]);
+
+      if (places.isEmpty) {
+        // Fallback to cafes with food if no restaurants found
+        final cafes = await _mapService.searchNearby(
+          location.latitude,
+          location.longitude,
+          type: 'cafe',
+          radiusMeters: (searchRadiusKm * 1000).round(),
+        ).timeout(_timeout, onTimeout: () => <TripLocation>[]);
+
+        return cafes.take(maxResults).map((place) => Amenity(
+          name: place.name,
+          address: place.address,
+          latitude: place.latitude,
+          longitude: place.longitude,
+          type: AmenityType.restaurant,
+          rating: place.metadata?['rating']?.toDouble(),
+          reviewCount: place.metadata?['user_ratings_total'],
+          source: 'osm',
+          placeId: place.placeId,
+        )).toList();
+      }
+
+      List<Amenity> amenities = places.map((place) => Amenity(
+        name: place.name,
+        address: place.address,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        type: AmenityType.restaurant,
+        rating: place.metadata?['rating']?.toDouble(),
+        reviewCount: place.metadata?['user_ratings_total'],
+        source: 'osm',
+        placeId: place.placeId,
+      )).toList();
+
+      // Filter by minimum rating
+      var filtered = amenities.where((a) => (a.rating ?? 3.0) >= minRating).toList();
+
+      // If no places meet rating, use unfiltered
+      if (filtered.isEmpty) {
+        filtered = amenities;
+      }
+
+      // Sort by rating and washroom quality
+      filtered.sort((a, b) {
+        if (preferGoodWashrooms) {
+          if (a.hasGoodWashroom && !b.hasGoodWashroom) return -1;
+          if (!a.hasGoodWashroom && b.hasGoodWashroom) return 1;
+        }
+        return (b.rating ?? 0).compareTo(a.rating ?? 0);
+      });
+
+      return filtered.take(maxResults).toList();
+    } catch (e) {
+      print('Find meal locations failed: $e');
+      return [];
+    }
+  }
+
+  /// Find break stop with intelligent selection based on break type and time
+  /// Returns restaurants for meal times, cafes for tea breaks
+  Future<Amenity?> findBreakStop({
+    required LatLng location,
+    required bool isMealTime,
+    double minRating = 3.5,
+    double searchRadiusKm = 5.0,
+    bool preferGoodWashrooms = true,
+  }) async {
+    try {
+      if (isMealTime) {
+        final restaurants = await findMealBreakLocations(
+          location: location,
+          minRating: minRating,
+          searchRadiusKm: searchRadiusKm,
+          maxResults: 5,
+          preferGoodWashrooms: preferGoodWashrooms,
+        );
+        return restaurants.isNotEmpty ? restaurants.first : null;
+      } else {
+        final teaStalls = await findTeaStalls(
+          routePoints: [location],
+          searchRadiusKm: searchRadiusKm,
+          maxResults: 5,
+        );
+        return teaStalls.isNotEmpty ? teaStalls.first : null;
+      }
+    } catch (e) {
+      print('Find break stop failed: $e');
+      return null;
+    }
+  }
+
   /// Find hotels/stays with minimum rating and proximity to towns
   /// Uses timeout to prevent hanging
   Future<List<Amenity>> findStayOptions({

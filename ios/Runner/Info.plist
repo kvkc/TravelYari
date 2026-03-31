@@ -56,6 +56,10 @@
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Yatra Planner needs your location to provide navigation even when the app is in the background.</string>
 
+	<!-- Contacts permission -->
+	<key>NSContactsUsageDescription</key>
+	<string>Yatra Planner needs access to your contacts to invite trip participants.</string>
+
 	<!-- Google Maps API Key -->
 	<key>GMSApiKey</key>
 	<string>YOUR_GOOGLE_MAPS_API_KEY</string>
@@ -85,6 +89,8 @@
 		<string>googlemaps</string>
 		<string>comgooglemaps</string>
 		<string>mappls</string>
+		<string>whatsapp</string>
+		<string>sms</string>
 	</array>
 </dict>
 </plist>
