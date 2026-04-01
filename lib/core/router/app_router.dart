@@ -10,6 +10,7 @@ import '../../features/settings/screens/settings_screen.dart';
 import '../../features/settings/screens/api_keys_screen.dart';
 import '../../features/amenities/screens/amenities_screen.dart';
 import '../../features/collaboration/screens/invite_participants_screen.dart';
+import '../../features/expenses/screens/expense_list_screen.dart';
 
 class AppRouter {
   static const String home = '/';
@@ -20,6 +21,7 @@ class AppRouter {
   static const String apiKeys = '/api-keys';
   static const String amenities = '/amenities';
   static const String inviteParticipants = '/invite-participants';
+  static const String expenses = '/expenses';
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -69,6 +71,13 @@ class AppRouter {
         final args = settings.arguments as Map<String, dynamic>;
         return MaterialPageRoute(
           builder: (_) => InviteParticipantsScreen(
+            trip: args['trip'] as Trip,
+          ),
+        );
+      case expenses:
+        final args = settings.arguments as Map<String, dynamic>;
+        return MaterialPageRoute(
+          builder: (_) => ExpenseListScreen(
             trip: args['trip'] as Trip,
           ),
         );

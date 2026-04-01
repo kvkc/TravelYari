@@ -94,6 +94,11 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
         actions: [
           const SyncStatusIndicator(),
           IconButton(
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: _openExpenses,
+            tooltip: 'Expenses',
+          ),
+          IconButton(
             icon: const Icon(Icons.group_add),
             onPressed: _inviteParticipants,
             tooltip: 'Invite participants',
@@ -525,6 +530,14 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     Navigator.pushNamed(
       context,
       AppRouter.inviteParticipants,
+      arguments: {'trip': _trip},
+    );
+  }
+
+  void _openExpenses() {
+    Navigator.pushNamed(
+      context,
+      AppRouter.expenses,
       arguments: {'trip': _trip},
     );
   }
