@@ -59,18 +59,42 @@ Download Yatra Planner to collaborate on trip planning.
     final message = generateInviteMessage(trip, inviteLink);
     final encodedMessage = Uri.encodeComponent(message);
 
-    // Clean phone number (remove spaces, dashes)
-    final cleanNumber = phoneNumber.replaceAll(RegExp(r'[\s\-\(\)]'), '');
+    // Clean and normalize phone number for wa.me (requires country code)
+    final cleanNumber = _normalizePhoneNumber(phoneNumber);
 
     final whatsappUrl = 'https://wa.me/$cleanNumber?text=$encodedMessage';
     final uri = Uri.parse(whatsappUrl);
 
-    if (await canLaunchUrl(uri)) {
+    try {
+      // Try launching directly - canLaunchUrl can be unreliable on some devices
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return true;
+    } catch (e) {
+      debugPrint('Failed to open WhatsApp: $e');
+      return false;
+    }
+  }
+
+  /// Normalize phone number to international format for wa.me
+  /// wa.me requires numbers without + prefix but with country code
+  String _normalizePhoneNumber(String phoneNumber) {
+    // Remove all non-digit characters
+    String digits = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+
+    // Handle Indian numbers (default country code)
+    if (digits.startsWith('91') && digits.length == 12) {
+      // Already has country code: 919876543210
+      return digits;
+    } else if (digits.startsWith('0') && digits.length == 11) {
+      // Starts with 0: 09876543210 -> 919876543210
+      return '91${digits.substring(1)}';
+    } else if (digits.length == 10) {
+      // Just 10 digits: 9876543210 -> 919876543210
+      return '91$digits';
     }
 
-    return false;
+    // Return as-is for other formats (international numbers)
+    return digits;
   }
 
   /// Send invite via SMS
@@ -81,15 +105,19 @@ Download Yatra Planner to collaborate on trip planning.
     final message = generateInviteMessage(trip, inviteLink);
     final encodedMessage = Uri.encodeComponent(message);
 
-    final smsUrl = 'sms:$phoneNumber?body=$encodedMessage';
+    // Clean phone number (keep original format for SMS, just remove spaces)
+    final cleanNumber = phoneNumber.replaceAll(RegExp(r'[\s]'), '');
+
+    final smsUrl = 'sms:$cleanNumber?body=$encodedMessage';
     final uri = Uri.parse(smsUrl);
 
-    if (await canLaunchUrl(uri)) {
+    try {
       await launchUrl(uri);
       return true;
+    } catch (e) {
+      debugPrint('Failed to open SMS: $e');
+      return false;
     }
-
-    return false;
   }
 
   /// Send invite via email
@@ -103,12 +131,13 @@ Download Yatra Planner to collaborate on trip planning.
     final emailUrl = 'mailto:$email?subject=$subject&body=$body';
     final uri = Uri.parse(emailUrl);
 
-    if (await canLaunchUrl(uri)) {
+    try {
       await launchUrl(uri);
       return true;
+    } catch (e) {
+      debugPrint('Failed to open email: $e');
+      return false;
     }
-
-    return false;
   }
 
   /// Parse share code from an invite link

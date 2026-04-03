@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +30,7 @@ class _InviteParticipantsScreenState
   List<ContactInfo> _contacts = [];
   bool _isLoading = true;
   bool _hasPermission = false;
+  String? _error;
   String? _shareLink;
   String? _shareCode;
 
@@ -48,17 +50,32 @@ class _InviteParticipantsScreenState
   Future<void> _loadContacts() async {
     final contactsService = ref.read(contactsServiceProvider);
 
-    final hasAccess = await contactsService.requestPermission();
-    setState(() => _hasPermission = hasAccess);
-
-    if (hasAccess) {
-      final contacts = await contactsService.getContacts();
+    try {
+      final hasAccess = await contactsService.requestPermission();
       setState(() {
-        _contacts = contacts;
+        _hasPermission = hasAccess;
+        _error = null;
+      });
+
+      if (hasAccess) {
+        final contacts = await contactsService.getContacts();
+        setState(() {
+          _contacts = contacts;
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } on ContactsServiceException catch (e) {
+      setState(() {
+        _error = e.message;
         _isLoading = false;
       });
-    } else {
-      setState(() => _isLoading = false);
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load contacts: $e';
+        _isLoading = false;
+      });
     }
   }
 
@@ -76,9 +93,14 @@ class _InviteParticipantsScreenState
   Future<void> _searchContacts(String query) async {
     if (!_hasPermission) return;
 
-    final contactsService = ref.read(contactsServiceProvider);
-    final contacts = await contactsService.getContacts(searchQuery: query);
-    setState(() => _contacts = contacts);
+    try {
+      final contactsService = ref.read(contactsServiceProvider);
+      final contacts = await contactsService.getContacts(searchQuery: query);
+      setState(() => _contacts = contacts);
+    } catch (e) {
+      // Keep existing contacts on search error
+      debugPrint('Search failed: $e');
+    }
   }
 
   void _sendInviteViaWhatsApp(ContactInfo contact) async {
@@ -269,6 +291,10 @@ class _InviteParticipantsScreenState
       return const Center(child: CircularProgressIndicator());
     }
 
+    if (_error != null) {
+      return _buildErrorState();
+    }
+
     if (!_hasPermission) {
       return _buildPermissionRequest();
     }
@@ -320,6 +346,61 @@ class _InviteParticipantsScreenState
               : null,
         );
       },
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 80,
+              color: Colors.red[300],
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Could not load contacts',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error ?? 'Unknown error',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _error = null;
+                });
+                _loadContacts();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: _shareViaSheet,
+              child: const Text('Or share link directly'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
