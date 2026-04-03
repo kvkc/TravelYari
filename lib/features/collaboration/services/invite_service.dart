@@ -23,9 +23,9 @@ class InviteService {
     if (shareCode == null) return null;
 
     // Generate deep link
-    // Format: yatraplanner://join?code=ABC123
-    // Web fallback: https://yatraplanner.app/join?code=ABC123
-    return 'yatraplanner://join?code=$shareCode';
+    // Format: travelyari://join?code=ABC123
+    // Web fallback: https://travelyari.app/join?code=ABC123
+    return 'travelyari://join?code=$shareCode';
   }
 
   /// Generate invite message with link
