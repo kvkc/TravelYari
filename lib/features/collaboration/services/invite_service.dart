@@ -22,10 +22,10 @@ class InviteService {
 
     if (shareCode == null) return null;
 
-    // Generate deep link
-    // Format: travelyari://join?code=ABC123
-    // Web fallback: https://travelyari.app/join?code=ABC123
-    return 'travelyari://join?code=$shareCode';
+    // Generate web link that can fallback to app store if app not installed
+    // The web page at this URL should try to open travelyari:// scheme
+    // and redirect to app store if that fails
+    return 'https://travelyari.app/join?code=$shareCode';
   }
 
   /// Generate invite message with link
@@ -141,14 +141,16 @@ Download Yatra Planner to collaborate on trip planning.
   }
 
   /// Parse share code from an invite link
+  /// Handles both web URLs (https://travelyari.app/join?code=XXX)
+  /// and custom scheme (travelyari://join?code=XXX)
   String? parseShareCodeFromLink(String link) {
     try {
       final uri = Uri.parse(link);
       return uri.queryParameters['code'];
     } catch (e) {
       // Try simple regex for share code
-      final match = RegExp(r'code=([A-Z0-9]{6})').firstMatch(link);
-      return match?.group(1);
+      final match = RegExp(r'code=([A-Z0-9]{6})', caseSensitive: false).firstMatch(link);
+      return match?.group(1)?.toUpperCase();
     }
   }
 
