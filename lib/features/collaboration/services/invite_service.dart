@@ -22,10 +22,9 @@ class InviteService {
 
     if (shareCode == null) return null;
 
-    // Generate web link that can fallback to app store if app not installed
-    // The web page at this URL should try to open travelyari:// scheme
-    // and redirect to app store if that fails
-    return 'https://travelyari.app/join?code=$shareCode';
+    // Generate deep link using custom URL scheme
+    // This directly opens the app if installed
+    return 'travelyari://join?code=$shareCode';
   }
 
   /// Generate invite message with link

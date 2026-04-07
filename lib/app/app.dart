@@ -13,11 +13,13 @@ class YatraApp extends ConsumerStatefulWidget {
 }
 
 class _YatraAppState extends ConsumerState<YatraApp> {
+  final _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
-    // Initialize shared location handler for WhatsApp/other app links
-    SharedLocationHandler.init(ref);
+    // Initialize shared location handler for WhatsApp/other app links and invite deep links
+    SharedLocationHandler.init(ref, navigatorKey: _navigatorKey);
   }
 
   @override
@@ -25,6 +27,7 @@ class _YatraAppState extends ConsumerState<YatraApp> {
     return MaterialApp(
       title: 'Yatra Planner',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
