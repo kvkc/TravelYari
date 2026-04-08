@@ -105,7 +105,7 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     state = state.copyWith(status: SyncStatus.syncing);
 
     try {
-      // Update owner if not set
+      // Update owner if not set (copyWith always bumps updatedAt)
       final tripToSync = trip.ownerId == null
           ? trip.copyWith(ownerId: userId, lastModifiedBy: userId)
           : trip.copyWith(lastModifiedBy: userId);
@@ -207,15 +207,64 @@ class TripSyncService extends StateNotifier<TripSyncState> {
         return null;
       }
 
-      // Add current user as participant
+      // Add current user's UID to participantIds for Firestore queries
       await _firestoreService.addParticipant(trip.id, userId);
 
-      // Save trip locally
+      // Link joining user to existing participant entry (by phone) or create new one
+      final user = _authService.currentUser;
+      final userPhone = user?.phoneNumber;
+      final userName = user?.displayName;
+
+      final updatedParticipants = List<TripParticipant>.from(trip.participants);
+      bool matched = false;
+
+      // Try matching by phone number to an existing contact-added participant
+      if (userPhone != null && userPhone.isNotEmpty) {
+        final cleanPhone = userPhone.replaceAll(RegExp(r'[^\d]'), '');
+        for (int i = 0; i < updatedParticipants.length; i++) {
+          final p = updatedParticipants[i];
+          if (p.userId == null && p.phone != null) {
+            final pClean = p.phone!.replaceAll(RegExp(r'[^\d]'), '');
+            if (pClean.endsWith(cleanPhone) || cleanPhone.endsWith(pClean)) {
+              // Link this participant entry to the joining user
+              updatedParticipants[i] = TripParticipant(
+                id: p.id,
+                userId: userId,
+                name: p.name ?? userName ?? 'Member',
+                phone: p.phone,
+                email: p.email ?? user?.email,
+                role: p.role,
+                joinedAt: DateTime.now(),
+              );
+              matched = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // No match found — create a new participant entry
+      if (!matched) {
+        updatedParticipants.add(TripParticipant(
+          id: userId,
+          userId: userId,
+          name: userName ?? 'Member',
+          phone: userPhone,
+          email: user?.email,
+          role: ParticipantRole.editor,
+        ));
+      }
+
+      // Save trip locally with updated participants
       final joinedTrip = trip.copyWith(
         participantIds: [...trip.participantIds, userId],
+        participants: updatedParticipants,
         lastSyncedAt: DateTime.now(),
       );
       await StorageService.saveTrip(joinedTrip);
+
+      // Sync the updated participants back to Firestore
+      await _firestoreService.saveTrip(joinedTrip, userId);
 
       // Pull remote expenses for this trip
       await _pullRemoteExpenses(trip.id);
@@ -230,59 +279,6 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       debugPrint('Failed to join trip: $e');
       return null;
     }
-  }
-
-  /// Add participants to a trip (with full contact info)
-  Future<Trip?> addParticipants(String tripId, List<TripParticipant> newParticipants) async {
-    if (!isSyncAvailable) return null;
-
-    final trip = StorageService.getTrip(tripId);
-    if (trip == null) return null;
-
-    // Ensure trip is synced to Firestore first
-    if (trip.lastSyncedAt == null) {
-      await syncTrip(trip);
-    }
-
-    try {
-      // Merge with existing participants (avoid duplicates by phone)
-      final existingPhones = trip.participants
-          .where((p) => p.phone != null)
-          .map((p) => p.phone!)
-          .toSet();
-
-      final filteredNew = newParticipants
-          .where((p) => p.phone == null || !existingPhones.contains(p.phone))
-          .toList();
-
-      if (filteredNew.isEmpty) return trip;
-
-      final allParticipants = [...trip.participants, ...filteredNew];
-
-      // Update Firestore
-      final success = await _firestoreService.updateTripParticipants(
-        tripId,
-        allParticipants,
-      );
-
-      if (success) {
-        final updatedTrip = trip.copyWith(
-          participants: allParticipants,
-          isShared: true,
-          lastSyncedAt: DateTime.now(),
-        );
-        await StorageService.saveTrip(updatedTrip);
-
-        // Push existing expenses to Firestore so participants can see them
-        await _pushLocalExpensesToCloud(tripId);
-
-        debugPrint('Added ${filteredNew.length} participants to trip: $tripId');
-        return updatedTrip;
-      }
-    } catch (e) {
-      debugPrint('Failed to add participants: $e');
-    }
-    return null;
   }
 
   // ============ EXPENSE SYNC ============
@@ -455,22 +451,15 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final localTrip = StorageService.getTrip(tripId);
     if (localTrip == null) return;
 
-    // Check if remote is newer
-    final remoteUpdated = remoteTrip.updatedAt;
-    final localUpdated = localTrip.lastSyncedAt ?? localTrip.updatedAt;
+    // Auto-apply changes from other participants
+    if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
+      final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+      await StorageService.saveTrip(syncedTrip);
 
-    if (remoteUpdated.isAfter(localUpdated)) {
-      // Only auto-apply changes from other participants
-      if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
-        // Auto-apply: save remote trip to local storage
-        final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
-        await StorageService.saveTrip(syncedTrip);
+      // Notify listening screens
+      _tripUpdateController.add(syncedTrip);
 
-        // Notify listening screens
-        _tripUpdateController.add(syncedTrip);
-
-        debugPrint('Remote changes auto-applied for trip: $tripId');
-      }
+      debugPrint('Remote changes auto-applied for trip: $tripId');
     }
   }
 

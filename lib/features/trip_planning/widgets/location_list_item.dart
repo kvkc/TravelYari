@@ -54,7 +54,7 @@ class LocationListItem extends StatelessWidget {
                                 ? AppTheme.accentColor
                                 : AppTheme.primaryColor,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.1),
@@ -96,9 +96,9 @@ class LocationListItem extends StatelessWidget {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.grey.shade200),
+                border: Border.all(color: Theme.of(context).dividerColor),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.04),
@@ -156,9 +156,10 @@ class LocationListItem extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     location.name,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontWeight: FontWeight.w500,
                                       fontSize: 14,
+                                      color: Theme.of(context).textTheme.bodyLarge?.color,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -172,7 +173,7 @@ class LocationListItem extends StatelessWidget {
                                 location.address!,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.grey[600],
+                                  color: Theme.of(context).textTheme.bodySmall?.color,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,

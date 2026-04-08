@@ -187,24 +187,6 @@ class FirestoreService {
     }
   }
 
-  /// Update trip participants list with full participant objects
-  Future<bool> updateTripParticipants(String tripId, List<TripParticipant> participants) async {
-    if (_tripsCollection == null) return false;
-
-    try {
-      await _tripsCollection!.doc(tripId).update({
-        'participants': participants.map((p) => p.toJson()).toList(),
-        'isShared': true,
-        'lastModifiedAt': FieldValue.serverTimestamp(),
-      });
-      debugPrint('Trip participants updated: ${participants.length} participants');
-      return true;
-    } catch (e) {
-      debugPrint('Failed to update trip participants: $e');
-      return false;
-    }
-  }
-
   /// Remove a participant from a trip
   Future<bool> removeParticipant(String tripId, String participantUserId) async {
     if (_tripsCollection == null) return false;

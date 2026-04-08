@@ -453,9 +453,30 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.group_add),
-            onPressed: _inviteParticipants,
-            tooltip: 'Add Members',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.people),
+                if (_trip.participants.isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.orange,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${_trip.participants.length}',
+                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _showParticipants,
+            tooltip: 'Participants',
           ),
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
@@ -496,6 +517,110 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
         ],
       ),
     );
+  }
+
+  void _showParticipants() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final participants = _trip.participants;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Text(
+                      'Participants (${participants.length})',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _inviteParticipants();
+                      },
+                      icon: const Icon(Icons.person_add, size: 18),
+                      label: const Text('Invite'),
+                    ),
+                  ],
+                ),
+              ),
+              if (participants.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  child: Text(
+                    'No participants yet. Invite members to collaborate!',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: participants.length,
+                  itemBuilder: (context, index) {
+                    final p = participants[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: _avatarColor(index),
+                        child: Text(
+                          (p.name ?? '?')[0].toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      title: Text(p.name ?? 'Member'),
+                      subtitle: Text(
+                        p.phone ?? p.email ?? (p.role == ParticipantRole.owner ? 'Owner' : 'Member'),
+                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                      ),
+                      trailing: p.role == ParticipantRole.owner
+                          ? Chip(
+                              label: const Text('Owner', style: TextStyle(fontSize: 11)),
+                              backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                              padding: EdgeInsets.zero,
+                              visualDensity: VisualDensity.compact,
+                            )
+                          : null,
+                    );
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Color _avatarColor(int index) {
+    const colors = [
+      Color(0xFF1E88E5),
+      Color(0xFF43A047),
+      Color(0xFFFF7043),
+      Color(0xFF8E24AA),
+      Color(0xFF00ACC1),
+    ];
+    return colors[index % colors.length];
   }
 
   Widget _buildStartingPointCard() {

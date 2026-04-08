@@ -2,11 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../../core/services/sync/trip_sync_service.dart';
 import '../../trip_planning/models/trip.dart';
-import 'contacts_service.dart';
 
 class InviteService {
   final TripSyncService _syncService;
@@ -142,24 +140,6 @@ Or enter code manually: *$shareCode*''';
       debugPrint('Failed to open email: $e');
       return false;
     }
-  }
-
-  /// Add contacts as trip participants directly in-app
-  Future<Trip?> addContactsAsParticipants(Trip trip, List<ContactInfo> contacts) async {
-    if (contacts.isEmpty) return null;
-
-    const uuid = Uuid();
-    final participants = contacts.map((contact) {
-      return TripParticipant(
-        id: uuid.v4(),
-        name: contact.name,
-        phone: contact.phone,
-        email: contact.email,
-        role: ParticipantRole.editor,
-      );
-    }).toList();
-
-    return await _syncService.addParticipants(trip.id, participants);
   }
 
   /// Parse share code from an invite link
