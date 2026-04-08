@@ -430,10 +430,13 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   }
 
   void _subscribeToTrip(String tripId) {
-    // Cancel existing subscription
-    _tripSubscriptions[tripId]?.cancel();
+    // Don't re-subscribe if already listening
+    if (_tripSubscriptions.containsKey(tripId)) {
+      // Still ensure expenses are subscribed
+      _subscribeToTripExpenses(tripId);
+      return;
+    }
 
-    // Start new subscription
     _tripSubscriptions[tripId] = _firestoreService.tripStream(tripId).listen(
       (remoteTrip) {
         if (remoteTrip != null) {

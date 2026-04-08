@@ -465,6 +465,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _updateDayPlanStay(int dayIndex, Amenity? newStay) {
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
       stayOption: newStay,
@@ -493,6 +494,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _updateStop(int dayIndex, int stopIndex, PlannedStop updatedStop) {
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops[stopIndex] = updatedStop;
@@ -533,6 +535,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _removeStop(int dayIndex, int stopIndex) {
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops.removeAt(stopIndex);
@@ -550,6 +553,12 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  /// Refresh _trip from storage to pick up any remote changes
+  void _refreshTrip() {
+    final latest = StorageService.getTrip(widget.tripId);
+    if (latest != null) _trip = latest;
   }
 
   Future<void> _saveAndUpdateTrip(Trip updatedTrip) async {
