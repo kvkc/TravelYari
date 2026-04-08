@@ -15,7 +15,6 @@ import '../widgets/day_plan_card.dart';
 import '../widgets/route_map_widget.dart';
 import '../widgets/share_options_sheet.dart';
 import '../widgets/edit_stay_sheet.dart';
-import '../../collaboration/widgets/invite_share_sheet.dart';
 import '../widgets/stay_options_list.dart';
 import '../widgets/edit_break_sheet.dart';
 
@@ -548,7 +547,17 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
 
   void _inviteParticipants() {
     if (_trip == null) return;
-    InviteShareSheet.show(context, _trip!);
+    Navigator.pushNamed(
+      context,
+      AppRouter.inviteParticipants,
+      arguments: {'trip': _trip},
+    ).then((_) {
+      // Reload trip from storage in case participants were added
+      final updated = StorageService.getTrip(widget.tripId);
+      if (updated != null && mounted) {
+        setState(() => _trip = updated);
+      }
+    });
   }
 
   void _openExpenses() {

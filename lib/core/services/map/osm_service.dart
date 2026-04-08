@@ -23,7 +23,7 @@ class OsmService implements MapServiceInterface {
   }
 
   OsmService() : _dio = Dio() {
-    _dio.options.headers['User-Agent'] = 'YatraPlanner/1.0 (travel planning app)';
+    _dio.options.headers['User-Agent'] = 'TravelYaari/1.0 (travel planning app)';
     _dio.options.headers['Accept'] = 'application/json';
     // Add timeout for better UX
     _dio.options.connectTimeout = const Duration(seconds: 15);

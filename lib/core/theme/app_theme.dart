@@ -27,6 +27,12 @@ class AppTheme {
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
+        actionsIconTheme: IconThemeData(color: Colors.white),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primaryColor,
+        ),
       ),
       cardTheme: CardTheme(
         elevation: 2,
@@ -81,6 +87,12 @@ class AppTheme {
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
+        actionsIconTheme: IconThemeData(color: Colors.white),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primaryColor,
+        ),
       ),
       cardTheme: CardTheme(
         elevation: 2,

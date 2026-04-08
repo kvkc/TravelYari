@@ -154,8 +154,11 @@ class TripSyncService extends StateNotifier<TripSyncState> {
 
   /// Sync a trip to cloud if it's shared (call after local edits)
   Future<void> syncIfShared(Trip trip) async {
-    if (!isSyncAvailable || !trip.isShared) return;
-    await syncTrip(trip);
+    if (!isSyncAvailable) return;
+    // Read fresh from storage — screen's trip object may be stale
+    final currentTrip = StorageService.getTrip(trip.id) ?? trip;
+    if (!currentTrip.isShared) return;
+    await syncTrip(currentTrip);
   }
 
   /// Share a trip and get share code

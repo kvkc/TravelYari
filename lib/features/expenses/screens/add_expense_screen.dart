@@ -190,13 +190,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 ),
               ),
             )
           else
             TextButton(
               onPressed: _saveExpense,
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
               child: const Text('Save'),
             ),
         ],

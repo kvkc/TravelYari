@@ -143,12 +143,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  void _joinTrip() {
+    Navigator.pushNamed(context, AppRouter.joinTrip).then((_) {
+      _loadTrips();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Yatra Planner'),
+        title: const Text('Travel Yaari'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add),
+            onPressed: _joinTrip,
+            tooltip: 'Join Trip',
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {

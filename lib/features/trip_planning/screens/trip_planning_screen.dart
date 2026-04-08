@@ -356,6 +356,28 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     );
   }
 
+  void _openExpenses() {
+    Navigator.pushNamed(
+      context,
+      AppRouter.expenses,
+      arguments: {'trip': _trip},
+    );
+  }
+
+  void _inviteParticipants() {
+    Navigator.pushNamed(
+      context,
+      AppRouter.inviteParticipants,
+      arguments: {'trip': _trip},
+    ).then((_) {
+      // Reload trip from storage in case participants were added
+      final updated = StorageService.getTrip(_trip.id);
+      if (updated != null && mounted) {
+        setState(() => _trip = updated);
+      }
+    });
+  }
+
   void _viewRoute() {
     if (_trip.status == TripStatus.draft) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -430,6 +452,16 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add),
+            onPressed: _inviteParticipants,
+            tooltip: 'Add Members',
+          ),
+          IconButton(
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: _openExpenses,
+            tooltip: 'Expenses',
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             onPressed: _showPreferences,

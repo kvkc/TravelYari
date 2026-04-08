@@ -29,17 +29,17 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace "com.example.yatra_planner"
-    compileSdk 34
-    ndkVersion flutter.ndkVersion
+    namespace "com.travelyari.app"
+    compileSdk 35
+    ndkVersion "25.1.8937393"
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
     }
 
     sourceSets {
@@ -47,12 +47,20 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.example.yatra_planner"
+        applicationId "com.travelyari.app"
         minSdkVersion 21
-        targetSdkVersion 34
+        targetSdkVersion 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
+
+        // Pass Google Maps API key to manifest
+        manifestPlaceholders = [
+            GOOGLE_MAPS_API_KEY: localProperties.getProperty('GOOGLE_MAPS_API_KEY')
+                ?: project.hasProperty('GOOGLE_MAPS_API_KEY')
+                    ? project.property('GOOGLE_MAPS_API_KEY')
+                    : System.getenv('GOOGLE_MAPS_API_KEY') ?: ''
+        ]
     }
 
     signingConfigs {
@@ -69,8 +77,9 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

@@ -165,7 +165,7 @@ class NotificationService extends StateNotifier<NotificationState> {
     return TripNotification(
       id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
       type: type,
-      title: notification.title ?? 'Yatra Planner',
+      title: notification.title ?? 'Travel Yaari',
       body: notification.body ?? '',
       tripId: data['tripId'],
     );

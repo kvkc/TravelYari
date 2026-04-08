@@ -23,7 +23,7 @@ class InviteParticipantsScreen extends ConsumerStatefulWidget {
 class _InviteParticipantsScreenState
     extends ConsumerState<InviteParticipantsScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final Set<String> _selectedContactIds = {};
+  final Map<String, ContactInfo> _selectedContacts = {};
 
   List<ContactInfo> _contacts = [];
   bool _isLoading = true;
@@ -87,20 +87,14 @@ class _InviteParticipantsScreenState
     }
   }
 
-  List<ContactInfo> get _selectedContacts {
-    return _contacts
-        .where((c) => _selectedContactIds.contains(c.id))
-        .toList();
-  }
-
   Future<void> _addSelectedContacts() async {
-    if (_selectedContactIds.isEmpty) return;
+    if (_selectedContacts.isEmpty) return;
 
     setState(() => _isAdding = true);
 
     try {
       final inviteService = ref.read(inviteServiceProvider);
-      final selected = _selectedContacts;
+      final selected = _selectedContacts.values.toList();
       final updatedTrip = await inviteService.addContactsAsParticipants(
         widget.trip,
         selected,
@@ -147,7 +141,7 @@ class _InviteParticipantsScreenState
 
   @override
   Widget build(BuildContext context) {
-    final selectedCount = _selectedContactIds.length;
+    final selectedCount = _selectedContacts.length;
 
     return Scaffold(
       appBar: AppBar(
@@ -157,13 +151,14 @@ class _InviteParticipantsScreenState
             onPressed: _shareInviteCode,
             icon: const Icon(Icons.share, size: 18),
             label: const Text('Share Code'),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
           ),
         ],
       ),
       body: Column(
         children: [
           // Selected contacts chips
-          if (_selectedContactIds.isNotEmpty) _buildSelectedChips(),
+          if (_selectedContacts.isNotEmpty) _buildSelectedChips(),
 
           // Search bar
           if (_hasPermission) _buildSearchBar(),
@@ -213,15 +208,13 @@ class _InviteParticipantsScreenState
   }
 
   Widget _buildSelectedChips() {
-    final selected = _selectedContacts;
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Wrap(
         spacing: 8,
         runSpacing: 4,
-        children: selected.map((contact) {
+        children: _selectedContacts.values.map((contact) {
           return Chip(
             avatar: CircleAvatar(
               backgroundColor: AppTheme.primaryColor,
@@ -238,7 +231,7 @@ class _InviteParticipantsScreenState
             deleteIcon: const Icon(Icons.close, size: 18),
             onDeleted: () {
               setState(() {
-                _selectedContactIds.remove(contact.id);
+                _selectedContacts.remove(contact.id);
               });
             },
           );
@@ -308,7 +301,7 @@ class _InviteParticipantsScreenState
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final contact = _contacts[index];
-        final isSelected = _selectedContactIds.contains(contact.id);
+        final isSelected = _selectedContacts.containsKey(contact.id);
 
         return ContactListItem(
           contact: contact,
@@ -316,9 +309,9 @@ class _InviteParticipantsScreenState
           onTap: () {
             setState(() {
               if (isSelected) {
-                _selectedContactIds.remove(contact.id);
+                _selectedContacts.remove(contact.id);
               } else {
-                _selectedContactIds.add(contact.id);
+                _selectedContacts[contact.id] = contact;
               }
             });
           },

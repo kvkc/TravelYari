@@ -36,7 +36,7 @@ class InviteService {
   /// Generate invite message with clickable link
   String generateInviteMessage(Trip trip, String shareCode) {
     final link = generateInviteLink(shareCode);
-    return '''Join my trip "${trip.name}" on Yatra Planner!
+    return '''Join my trip "${trip.name}" on Travel Yaari!
 
 $link
 
