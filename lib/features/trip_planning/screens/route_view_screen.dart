@@ -553,11 +553,20 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   Future<void> _saveAndUpdateTrip(Trip updatedTrip) async {
+    // Merge with latest storage to preserve remote changes (participants, etc.)
+    final latest = StorageService.getTrip(updatedTrip.id);
+    if (latest != null) {
+      updatedTrip = updatedTrip.copyWith(
+        participants: latest.participants,
+        participantIds: latest.participantIds,
+        shareCode: latest.shareCode,
+        isShared: latest.isShared || updatedTrip.isShared,
+      );
+    }
     await StorageService.saveTrip(updatedTrip);
     setState(() {
       _trip = updatedTrip;
     });
-    // Auto-sync to Firestore if trip is shared with participants
     final syncService = ref.read(tripSyncServiceProvider.notifier);
     syncService.syncIfShared(updatedTrip);
   }

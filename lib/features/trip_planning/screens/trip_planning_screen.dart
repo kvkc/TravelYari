@@ -155,8 +155,17 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   Future<void> _saveTrip() async {
+    // Merge with latest storage to preserve remote changes (participants, etc.)
+    final latest = StorageService.getTrip(_trip.id);
+    if (latest != null) {
+      _trip = _trip.copyWith(
+        participants: latest.participants,
+        participantIds: latest.participantIds,
+        shareCode: latest.shareCode,
+        isShared: latest.isShared || _trip.isShared,
+      );
+    }
     await StorageService.saveTrip(_trip);
-    // Auto-sync to Firestore if trip is shared with participants
     final syncService = ref.read(tripSyncServiceProvider.notifier);
     syncService.syncIfShared(_trip);
   }
