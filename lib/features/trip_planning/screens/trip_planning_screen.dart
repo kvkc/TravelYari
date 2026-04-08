@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/sync/trip_sync_service.dart';
 import '../../../core/services/trip/trip_planner_service.dart';
 import '../../../core/services/map/unified_map_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -33,12 +36,31 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   bool _isLoading = false;
   bool _isPlanning = false;
   bool _isLoadingLocation = false;
+  StreamSubscription<Trip>? _remoteTripSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadOrCreateTrip();
     _initStartingPoint();
+    _listenForRemoteUpdates();
+  }
+
+  void _listenForRemoteUpdates() {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
+      if (updatedTrip.id == _trip.id && mounted) {
+        setState(() {
+          _trip = updatedTrip;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _remoteTripSubscription?.cancel();
+    super.dispose();
   }
 
   void _loadOrCreateTrip() {
@@ -134,6 +156,9 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
 
   Future<void> _saveTrip() async {
     await StorageService.saveTrip(_trip);
+    // Auto-sync to Firestore if trip is shared with participants
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    syncService.syncIfShared(_trip);
   }
 
   Future<void> _editStartingPoint() async {

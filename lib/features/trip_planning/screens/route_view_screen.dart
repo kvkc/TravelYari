@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -13,9 +15,9 @@ import '../widgets/day_plan_card.dart';
 import '../widgets/route_map_widget.dart';
 import '../widgets/share_options_sheet.dart';
 import '../widgets/edit_stay_sheet.dart';
+import '../../collaboration/widgets/invite_share_sheet.dart';
 import '../widgets/stay_options_list.dart';
 import '../widgets/edit_break_sheet.dart';
-import '../widgets/sync_indicator_widget.dart';
 
 class RouteViewScreen extends ConsumerStatefulWidget {
   final String tripId;
@@ -34,11 +36,32 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   Trip? _trip;
   late TabController _tabController;
   int _selectedDayIndex = 0;
+  StreamSubscription<Trip>? _remoteTripSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadTrip();
+    _listenForRemoteUpdates();
+  }
+
+  void _listenForRemoteUpdates() {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
+      if (updatedTrip.id == widget.tripId && mounted) {
+        setState(() {
+          _trip = updatedTrip;
+          // Reinitialize tab controller if day plan count changed
+          if (updatedTrip.dayPlans.length + 1 != _tabController.length) {
+            _tabController.dispose();
+            _tabController = TabController(
+              length: updatedTrip.dayPlans.length + 1,
+              vsync: this,
+            );
+          }
+        });
+      }
+    });
   }
 
   void _loadTrip() {
@@ -56,6 +79,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
 
   @override
   void dispose() {
+    _remoteTripSubscription?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -92,7 +116,6 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
           },
         ),
         actions: [
-          const SyncStatusIndicator(),
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
             onPressed: _openExpenses,
@@ -125,12 +148,6 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   Widget _buildOverviewTab() {
     return Column(
       children: [
-        // Sync indicator banner
-        SyncIndicatorWidget(
-          tripId: _trip!.id,
-          onRefresh: _refreshFromCloud,
-        ),
-
         // Map showing full route
         Expanded(
           flex: 2,
@@ -520,6 +537,9 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     setState(() {
       _trip = updatedTrip;
     });
+    // Auto-sync to Firestore if trip is shared with participants
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    syncService.syncIfShared(updatedTrip);
   }
 
   void _shareTrip() {
@@ -527,11 +547,8 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _inviteParticipants() {
-    Navigator.pushNamed(
-      context,
-      AppRouter.inviteParticipants,
-      arguments: {'trip': _trip},
-    );
+    if (_trip == null) return;
+    InviteShareSheet.show(context, _trip!);
   }
 
   void _openExpenses() {

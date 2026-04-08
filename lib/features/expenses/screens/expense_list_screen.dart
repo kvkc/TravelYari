@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/sync/trip_sync_service.dart';
 import '../../trip_planning/models/trip.dart';
 import '../models/currency.dart';
 import '../models/expense.dart';
@@ -26,11 +29,29 @@ class _ExpenseListScreenState extends ConsumerState<ExpenseListScreen> {
   String? _selectedCategory;
   late TripCurrencySettings _currencySettings;
   bool _isLoading = true;
+  StreamSubscription<(String, List<Expense>)>? _expenseSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadCurrencySettings();
+    _listenForRemoteUpdates();
+  }
+
+  void _listenForRemoteUpdates() {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    _expenseSubscription = syncService.expenseUpdates.listen((update) {
+      final (tripId, _) = update;
+      if (tripId == widget.trip.id && mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _expenseSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadCurrencySettings() async {

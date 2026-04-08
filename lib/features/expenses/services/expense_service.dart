@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/sync/trip_sync_service.dart';
 import '../../trip_planning/models/trip.dart';
 import '../models/currency.dart';
 import '../models/expense.dart';
@@ -10,23 +11,33 @@ import 'settlement_calculator.dart';
 
 class ExpenseService {
   final CurrencyService _currencyService;
+  final TripSyncService _syncService;
 
-  ExpenseService({CurrencyService? currencyService})
-      : _currencyService = currencyService ?? CurrencyService();
+  ExpenseService({
+    CurrencyService? currencyService,
+    required TripSyncService syncService,
+  })  : _currencyService = currencyService ?? CurrencyService(),
+        _syncService = syncService;
 
   // CRUD Operations
 
   Future<void> addExpense(Expense expense) async {
     await StorageService.saveExpense(expense);
+    _syncService.syncExpense(expense);
   }
 
   Future<void> updateExpense(Expense expense) async {
     final updated = expense.copyWith(updatedAt: DateTime.now());
     await StorageService.saveExpense(updated);
+    _syncService.syncExpense(updated);
   }
 
   Future<void> deleteExpense(String expenseId) async {
+    final expense = StorageService.getExpense(expenseId);
     await StorageService.deleteExpense(expenseId);
+    if (expense != null) {
+      _syncService.deleteExpenseFromCloud(expenseId, expense.tripId);
+    }
   }
 
   Expense? getExpense(String expenseId) {
@@ -136,6 +147,7 @@ final currencyServiceProvider = Provider<CurrencyService>((ref) {
 final expenseServiceProvider = Provider<ExpenseService>((ref) {
   return ExpenseService(
     currencyService: ref.watch(currencyServiceProvider),
+    syncService: ref.watch(tripSyncServiceProvider.notifier),
   );
 });
 

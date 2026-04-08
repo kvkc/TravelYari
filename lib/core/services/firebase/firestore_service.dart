@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../features/expenses/models/expense.dart';
 import '../../../features/trip_planning/models/trip.dart';
 import 'firebase_service.dart';
 
@@ -186,6 +187,24 @@ class FirestoreService {
     }
   }
 
+  /// Update trip participants list with full participant objects
+  Future<bool> updateTripParticipants(String tripId, List<TripParticipant> participants) async {
+    if (_tripsCollection == null) return false;
+
+    try {
+      await _tripsCollection!.doc(tripId).update({
+        'participants': participants.map((p) => p.toJson()).toList(),
+        'isShared': true,
+        'lastModifiedAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('Trip participants updated: ${participants.length} participants');
+      return true;
+    } catch (e) {
+      debugPrint('Failed to update trip participants: $e');
+      return false;
+    }
+  }
+
   /// Remove a participant from a trip
   Future<bool> removeParticipant(String tripId, String participantUserId) async {
     if (_tripsCollection == null) return false;
@@ -236,6 +255,74 @@ class FirestoreService {
       debugPrint('Failed to get user profile: $e');
       return null;
     }
+  }
+
+  // ============ EXPENSE OPERATIONS ============
+
+  CollectionReference<Map<String, dynamic>>? get _expensesCollection =>
+      _firestore?.collection('expenses');
+
+  /// Save/update an expense to Firestore
+  Future<bool> saveExpense(Expense expense) async {
+    if (_expensesCollection == null) return false;
+
+    try {
+      await _expensesCollection!.doc(expense.id).set(
+        expense.toJson(),
+        SetOptions(merge: true),
+      );
+      debugPrint('Expense saved to Firestore: ${expense.id}');
+      return true;
+    } catch (e) {
+      debugPrint('Failed to save expense: $e');
+      return false;
+    }
+  }
+
+  /// Delete an expense from Firestore
+  Future<bool> deleteExpenseFromCloud(String expenseId) async {
+    if (_expensesCollection == null) return false;
+
+    try {
+      await _expensesCollection!.doc(expenseId).delete();
+      debugPrint('Expense deleted from Firestore: $expenseId');
+      return true;
+    } catch (e) {
+      debugPrint('Failed to delete expense: $e');
+      return false;
+    }
+  }
+
+  /// Get all expenses for a trip
+  Future<List<Expense>> getTripExpenses(String tripId) async {
+    if (_expensesCollection == null) return [];
+
+    try {
+      final query = await _expensesCollection!
+          .where('tripId', isEqualTo: tripId)
+          .get();
+
+      return query.docs
+          .where((doc) => doc.data() != null)
+          .map((doc) => Expense.fromJson(doc.data()))
+          .toList();
+    } catch (e) {
+      debugPrint('Failed to get trip expenses: $e');
+      return [];
+    }
+  }
+
+  /// Listen to expense changes for a trip
+  Stream<List<Expense>> tripExpensesStream(String tripId) {
+    if (_expensesCollection == null) return Stream.value([]);
+
+    return _expensesCollection!
+        .where('tripId', isEqualTo: tripId)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .where((doc) => doc.data() != null)
+            .map((doc) => Expense.fromJson(doc.data()))
+            .toList());
   }
 
   // ============ HELPERS ============

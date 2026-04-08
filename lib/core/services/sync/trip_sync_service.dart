@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../features/expenses/models/expense.dart';
 import '../../../features/trip_planning/models/trip.dart';
 import '../firebase/auth_service.dart';
 import '../firebase/firestore_service.dart';
@@ -54,6 +55,15 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   final FirestoreService _firestoreService;
   final AuthService _authService;
   final Map<String, StreamSubscription> _tripSubscriptions = {};
+  final Map<String, StreamSubscription> _expenseSubscriptions = {};
+  final _tripUpdateController = StreamController<Trip>.broadcast();
+  final _expenseUpdateController = StreamController<(String, List<Expense>)>.broadcast();
+
+  /// Stream that emits updated trips when remote changes are applied
+  Stream<Trip> get tripUpdates => _tripUpdateController.stream;
+
+  /// Stream that emits (tripId, expenses) when remote expense changes are applied
+  Stream<(String, List<Expense>)> get expenseUpdates => _expenseUpdateController.stream;
 
   TripSyncService({
     required FirestoreService firestoreService,
@@ -142,22 +152,34 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     );
   }
 
+  /// Sync a trip to cloud if it's shared (call after local edits)
+  Future<void> syncIfShared(Trip trip) async {
+    if (!isSyncAvailable || !trip.isShared) return;
+    await syncTrip(trip);
+  }
+
   /// Share a trip and get share code
   Future<String?> shareTrip(String tripId) async {
     if (!isSyncAvailable) return null;
 
-    // First sync the trip
     final trip = StorageService.getTrip(tripId);
     if (trip == null) return null;
 
-    await syncTrip(trip);
+    // Only sync if trip hasn't been synced recently or has pending changes
+    final needsSync = trip.lastSyncedAt == null ||
+        state.pendingChanges.contains(tripId);
+
+    if (needsSync) {
+      await syncTrip(trip);
+    }
 
     // Generate share code
     final shareCode = await _firestoreService.generateShareCode(tripId);
 
     if (shareCode != null) {
-      // Update local trip with share code
-      final updatedTrip = trip.copyWith(
+      // Update local trip with share code - get fresh copy after sync
+      final currentTrip = StorageService.getTrip(tripId) ?? trip;
+      final updatedTrip = currentTrip.copyWith(
         shareCode: shareCode,
         isShared: true,
       );
@@ -192,6 +214,10 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       );
       await StorageService.saveTrip(joinedTrip);
 
+      // Pull remote expenses for this trip
+      await _pullRemoteExpenses(trip.id);
+      _expenseInitialSyncDone.add(trip.id);
+
       // Subscribe to changes
       _subscribeToTrip(trip.id);
 
@@ -200,6 +226,164 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     } catch (e) {
       debugPrint('Failed to join trip: $e');
       return null;
+    }
+  }
+
+  /// Add participants to a trip (with full contact info)
+  Future<Trip?> addParticipants(String tripId, List<TripParticipant> newParticipants) async {
+    if (!isSyncAvailable) return null;
+
+    final trip = StorageService.getTrip(tripId);
+    if (trip == null) return null;
+
+    // Ensure trip is synced to Firestore first
+    if (trip.lastSyncedAt == null) {
+      await syncTrip(trip);
+    }
+
+    try {
+      // Merge with existing participants (avoid duplicates by phone)
+      final existingPhones = trip.participants
+          .where((p) => p.phone != null)
+          .map((p) => p.phone!)
+          .toSet();
+
+      final filteredNew = newParticipants
+          .where((p) => p.phone == null || !existingPhones.contains(p.phone))
+          .toList();
+
+      if (filteredNew.isEmpty) return trip;
+
+      final allParticipants = [...trip.participants, ...filteredNew];
+
+      // Update Firestore
+      final success = await _firestoreService.updateTripParticipants(
+        tripId,
+        allParticipants,
+      );
+
+      if (success) {
+        final updatedTrip = trip.copyWith(
+          participants: allParticipants,
+          isShared: true,
+          lastSyncedAt: DateTime.now(),
+        );
+        await StorageService.saveTrip(updatedTrip);
+
+        // Push existing expenses to Firestore so participants can see them
+        await _pushLocalExpensesToCloud(tripId);
+
+        debugPrint('Added ${filteredNew.length} participants to trip: $tripId');
+        return updatedTrip;
+      }
+    } catch (e) {
+      debugPrint('Failed to add participants: $e');
+    }
+    return null;
+  }
+
+  // ============ EXPENSE SYNC ============
+
+  /// Sync an expense to Firestore if its trip is shared
+  Future<void> syncExpense(Expense expense) async {
+    if (!isSyncAvailable) return;
+
+    final trip = StorageService.getTrip(expense.tripId);
+    if (trip == null || !trip.isShared) return;
+
+    await _firestoreService.saveExpense(expense);
+    _subscribeToTripExpenses(expense.tripId);
+  }
+
+  /// Delete an expense from Firestore if its trip is shared
+  Future<void> deleteExpenseFromCloud(String expenseId, String tripId) async {
+    if (!isSyncAvailable) return;
+
+    final trip = StorageService.getTrip(tripId);
+    if (trip == null || !trip.isShared) return;
+
+    await _firestoreService.deleteExpenseFromCloud(expenseId);
+  }
+
+  // Track which trips have completed initial expense sync
+  final Set<String> _expenseInitialSyncDone = {};
+
+  void _subscribeToTripExpenses(String tripId) {
+    // Don't re-subscribe if already listening
+    if (_expenseSubscriptions.containsKey(tripId)) return;
+
+    // Push local expenses to Firestore before subscribing
+    // This ensures local-only expenses aren't deleted by the first remote snapshot
+    _pushLocalExpensesToCloud(tripId);
+
+    _expenseSubscriptions[tripId] = _firestoreService
+        .tripExpensesStream(tripId)
+        .listen(
+      (remoteExpenses) {
+        _handleRemoteExpenseChanges(tripId, remoteExpenses);
+      },
+      onError: (e) => debugPrint('Expense subscription error: $e'),
+    );
+  }
+
+  /// Push all local expenses for a trip to Firestore (initial sync)
+  Future<void> _pushLocalExpensesToCloud(String tripId) async {
+    if (_expenseInitialSyncDone.contains(tripId)) return;
+    _expenseInitialSyncDone.add(tripId);
+
+    final localExpenses = StorageService.getTripExpenses(tripId);
+    for (final expense in localExpenses) {
+      await _firestoreService.saveExpense(expense);
+    }
+    if (localExpenses.isNotEmpty) {
+      debugPrint('Pushed ${localExpenses.length} local expenses to Firestore for trip: $tripId');
+    }
+  }
+
+  /// Pull all remote expenses for a trip to local storage
+  Future<void> _pullRemoteExpenses(String tripId) async {
+    final remoteExpenses = await _firestoreService.getTripExpenses(tripId);
+    for (final expense in remoteExpenses) {
+      await StorageService.saveExpense(expense);
+    }
+    if (remoteExpenses.isNotEmpty) {
+      debugPrint('Pulled ${remoteExpenses.length} remote expenses for trip: $tripId');
+    }
+  }
+
+  void _handleRemoteExpenseChanges(String tripId, List<Expense> remoteExpenses) async {
+    // Get local expenses for comparison
+    final localExpenses = StorageService.getTripExpenses(tripId);
+    final localIds = localExpenses.map((e) => e.id).toSet();
+    final remoteIds = remoteExpenses.map((e) => e.id).toSet();
+
+    bool changed = false;
+
+    // Add/update remote expenses locally
+    for (final remote in remoteExpenses) {
+      final local = localExpenses.where((e) => e.id == remote.id).firstOrNull;
+      if (local == null || remote.updatedAt.isAfter(local.updatedAt)) {
+        await StorageService.saveExpense(remote);
+        changed = true;
+      }
+    }
+
+    // Remove local expenses that were deleted remotely
+    // Only safe after initial sync has pushed local expenses to cloud
+    if (_expenseInitialSyncDone.contains(tripId)) {
+      for (final localId in localIds) {
+        if (!remoteIds.contains(localId)) {
+          await StorageService.deleteExpense(localId);
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      // Re-read the updated list and notify screens with tripId
+      final updatedExpenses = StorageService.getTripExpenses(tripId);
+      _expenseUpdateController.add((tripId, updatedExpenses));
+      debugPrint('Remote expense changes applied for trip: $tripId');
     }
   }
 
@@ -259,9 +443,12 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       },
       onError: (e) => debugPrint('Trip subscription error: $e'),
     );
+
+    // Also subscribe to expenses for this trip
+    _subscribeToTripExpenses(tripId);
   }
 
-  void _handleRemoteTripChange(String tripId, Trip remoteTrip) {
+  void _handleRemoteTripChange(String tripId, Trip remoteTrip) async {
     final localTrip = StorageService.getTrip(tripId);
     if (localTrip == null) return;
 
@@ -270,13 +457,16 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final localUpdated = localTrip.lastSyncedAt ?? localTrip.updatedAt;
 
     if (remoteUpdated.isAfter(localUpdated)) {
-      // Remote has changes - notify user
+      // Only auto-apply changes from other participants
       if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
-        state = state.copyWith(
-          tripsWithRemoteChanges: Set.from(state.tripsWithRemoteChanges)
-            ..add(tripId),
-        );
-        debugPrint('Remote changes detected for trip: $tripId');
+        // Auto-apply: save remote trip to local storage
+        final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+        await StorageService.saveTrip(syncedTrip);
+
+        // Notify listening screens
+        _tripUpdateController.add(syncedTrip);
+
+        debugPrint('Remote changes auto-applied for trip: $tripId');
       }
     }
   }
@@ -300,6 +490,12 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       subscription.cancel();
     }
     _tripSubscriptions.clear();
+    for (var subscription in _expenseSubscriptions.values) {
+      subscription.cancel();
+    }
+    _expenseSubscriptions.clear();
+    _tripUpdateController.close();
+    _expenseUpdateController.close();
     super.dispose();
   }
 }

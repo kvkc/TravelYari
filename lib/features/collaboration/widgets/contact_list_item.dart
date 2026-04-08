@@ -7,16 +7,12 @@ class ContactListItem extends StatelessWidget {
   final ContactInfo contact;
   final bool isSelected;
   final VoidCallback? onTap;
-  final VoidCallback? onInviteViaSms;
-  final VoidCallback? onInviteViaWhatsApp;
 
   const ContactListItem({
     super.key,
     required this.contact,
     this.isSelected = false,
     this.onTap,
-    this.onInviteViaSms,
-    this.onInviteViaWhatsApp,
   });
 
   @override
@@ -36,9 +32,10 @@ class ContactListItem extends StatelessWidget {
           fontSize: 13,
         ),
       ),
-      trailing: isSelected
-          ? Icon(Icons.check_circle, color: AppTheme.primaryColor)
-          : _buildInviteButtons(),
+      trailing: Icon(
+        isSelected ? Icons.check_circle : Icons.circle_outlined,
+        color: isSelected ? AppTheme.primaryColor : Colors.grey[400],
+      ),
       onTap: onTap,
     );
   }
@@ -60,34 +57,6 @@ class ContactListItem extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
-    );
-  }
-
-  Widget? _buildInviteButtons() {
-    if (onInviteViaSms == null && onInviteViaWhatsApp == null) {
-      return null;
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (contact.phone != null && onInviteViaWhatsApp != null)
-          IconButton(
-            icon: const Icon(Icons.chat, color: Colors.green),
-            onPressed: onInviteViaWhatsApp,
-            tooltip: 'Send via WhatsApp',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-          ),
-        if (contact.phone != null && onInviteViaSms != null)
-          IconButton(
-            icon: Icon(Icons.sms, color: Colors.blue[700]),
-            onPressed: onInviteViaSms,
-            tooltip: 'Send via SMS',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-          ),
-      ],
     );
   }
 

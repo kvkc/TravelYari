@@ -1,6 +1,4 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -30,15 +28,13 @@ class _InviteParticipantsScreenState
   List<ContactInfo> _contacts = [];
   bool _isLoading = true;
   bool _hasPermission = false;
+  bool _isAdding = false;
   String? _error;
-  String? _shareLink;
-  String? _shareCode;
 
   @override
   void initState() {
     super.initState();
     _loadContacts();
-    _generateShareLink();
   }
 
   @override
@@ -79,17 +75,6 @@ class _InviteParticipantsScreenState
     }
   }
 
-  Future<void> _generateShareLink() async {
-    final inviteService = ref.read(inviteServiceProvider);
-    final link = await inviteService.generateInviteLink(widget.trip);
-    final code = inviteService.parseShareCodeFromLink(link ?? '');
-
-    setState(() {
-      _shareLink = link;
-      _shareCode = code;
-    });
-  }
-
   Future<void> _searchContacts(String query) async {
     if (!_hasPermission) return;
 
@@ -98,77 +83,87 @@ class _InviteParticipantsScreenState
       final contacts = await contactsService.getContacts(searchQuery: query);
       setState(() => _contacts = contacts);
     } catch (e) {
-      // Keep existing contacts on search error
       debugPrint('Search failed: $e');
     }
   }
 
-  void _sendInviteViaWhatsApp(ContactInfo contact) async {
-    if (contact.phone == null) return;
+  List<ContactInfo> get _selectedContacts {
+    return _contacts
+        .where((c) => _selectedContactIds.contains(c.id))
+        .toList();
+  }
 
-    final inviteService = ref.read(inviteServiceProvider);
-    final success =
-        await inviteService.sendWhatsAppInvite(widget.trip, contact.phone!);
+  Future<void> _addSelectedContacts() async {
+    if (_selectedContactIds.isEmpty) return;
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success
-              ? 'Opening WhatsApp...'
-              : 'Could not open WhatsApp'),
-        ),
+    setState(() => _isAdding = true);
+
+    try {
+      final inviteService = ref.read(inviteServiceProvider);
+      final selected = _selectedContacts;
+      final updatedTrip = await inviteService.addContactsAsParticipants(
+        widget.trip,
+        selected,
       );
+
+      if (mounted) {
+        if (updatedTrip != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Added ${selected.length} member${selected.length > 1 ? 's' : ''} to trip',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.pop(context, updatedTrip);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to add members. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isAdding = false);
     }
   }
 
-  void _sendInviteViaSms(ContactInfo contact) async {
-    if (contact.phone == null) return;
-
-    final inviteService = ref.read(inviteServiceProvider);
-    final success =
-        await inviteService.sendSmsInvite(widget.trip, contact.phone!);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content:
-              Text(success ? 'Opening Messages...' : 'Could not open Messages'),
-        ),
-      );
-    }
-  }
-
-  void _shareViaSheet() {
+  void _shareInviteCode() {
     final inviteService = ref.read(inviteServiceProvider);
     inviteService.shareInvite(widget.trip);
   }
 
-  void _copyShareLink() {
-    if (_shareLink == null) return;
-
-    Clipboard.setData(ClipboardData(text: _shareLink!));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Invite link copied to clipboard')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final selectedCount = _selectedContactIds.length;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Invite Participants'),
+        title: const Text('Add Trip Members'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: _shareViaSheet,
-            tooltip: 'Share invite link',
+          TextButton.icon(
+            onPressed: _shareInviteCode,
+            icon: const Icon(Icons.share, size: 18),
+            label: const Text('Share Code'),
           ),
         ],
       ),
       body: Column(
         children: [
-          // Share code card
-          _buildShareCodeCard(),
+          // Selected contacts chips
+          if (_selectedContactIds.isNotEmpty) _buildSelectedChips(),
 
           // Search bar
           if (_hasPermission) _buildSearchBar(),
@@ -179,95 +174,82 @@ class _InviteParticipantsScreenState
           ),
         ],
       ),
+      // Add Members button
+      bottomNavigationBar: selectedCount > 0
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: ElevatedButton(
+                  onPressed: _isAdding ? null : _addSelectedContacts,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _isAdding
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          'Add $selectedCount Member${selectedCount > 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            )
+          : null,
     );
   }
 
-  Widget _buildShareCodeCard() {
-    return Card(
-      margin: const EdgeInsets.all(16),
-      color: AppTheme.primaryColor.withOpacity(0.1),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.link, color: AppTheme.primaryColor),
-                const SizedBox(width: 8),
-                const Text(
-                  'Share Link',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (_shareCode != null) ...[
-              Text(
-                'Share this code with your trip partners:',
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.primaryColor),
-                    ),
-                    child: Text(
-                      _shareCode!,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primaryColor,
-                        letterSpacing: 2,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    icon: const Icon(Icons.copy),
-                    onPressed: _copyShareLink,
-                    tooltip: 'Copy link',
-                    color: AppTheme.primaryColor,
-                  ),
-                ],
-              ),
-            ] else
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _shareViaSheet,
-                icon: const Icon(Icons.share),
-                label: const Text('Share via...'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.primaryColor,
+  Widget _buildSelectedChips() {
+    final selected = _selectedContacts;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: selected.map((contact) {
+          return Chip(
+            avatar: CircleAvatar(
+              backgroundColor: AppTheme.primaryColor,
+              child: Text(
+                contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-          ],
-        ),
+            label: Text(contact.name),
+            deleteIcon: const Icon(Icons.close, size: 18),
+            onDeleted: () {
+              setState(() {
+                _selectedContactIds.remove(contact.id);
+              });
+            },
+          );
+        }).toList(),
       ),
     );
   }
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
@@ -307,7 +289,9 @@ class _InviteParticipantsScreenState
             Icon(Icons.contacts_outlined, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'No contacts found',
+              _searchController.text.isNotEmpty
+                  ? 'No contacts match your search'
+                  : 'No contacts found',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[600],
@@ -319,7 +303,7 @@ class _InviteParticipantsScreenState
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.only(top: 8),
       itemCount: _contacts.length,
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, index) {
@@ -338,12 +322,6 @@ class _InviteParticipantsScreenState
               }
             });
           },
-          onInviteViaWhatsApp: contact.phone != null
-              ? () => _sendInviteViaWhatsApp(contact)
-              : null,
-          onInviteViaSms: contact.phone != null
-              ? () => _sendInviteViaSms(contact)
-              : null,
         );
       },
     );
@@ -393,11 +371,6 @@ class _InviteParticipantsScreenState
                 foregroundColor: Colors.white,
               ),
             ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: _shareViaSheet,
-              child: const Text('Or share link directly'),
-            ),
           ],
         ),
       ),
@@ -426,7 +399,7 @@ class _InviteParticipantsScreenState
             ),
             const SizedBox(height: 12),
             Text(
-              'To invite trip participants from your contacts, please grant contacts permission.',
+              'To add trip members from your contacts, please grant contacts permission.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.grey[600],
@@ -447,9 +420,10 @@ class _InviteParticipantsScreenState
               ),
             ),
             const SizedBox(height: 16),
-            TextButton(
-              onPressed: _shareViaSheet,
-              child: const Text('Or share link directly'),
+            TextButton.icon(
+              onPressed: _shareInviteCode,
+              icon: const Icon(Icons.share, size: 16),
+              label: const Text('Or share invite code'),
             ),
           ],
         ),

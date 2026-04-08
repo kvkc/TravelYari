@@ -2,60 +2,65 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/services/sync/trip_sync_service.dart';
 import '../../trip_planning/models/trip.dart';
+import 'contacts_service.dart';
 
 class InviteService {
   final TripSyncService _syncService;
 
+  // Firebase Hosting domain
+  static const String _hostingDomain = 'yatraplanner-50f70.web.app';
+
   InviteService(this._syncService);
 
-  /// Generate a shareable invite link for a trip
-  Future<String?> generateInviteLink(Trip trip) async {
-    // Get or generate share code
-    String? shareCode = trip.shareCode;
-
-    if (shareCode == null || shareCode.isEmpty) {
-      shareCode = await _syncService.shareTrip(trip.id);
+  /// Get or generate share code for a trip
+  Future<String?> getShareCode(Trip trip) async {
+    // Use existing share code if available (avoids network call)
+    if (trip.shareCode != null && trip.shareCode!.isNotEmpty) {
+      return trip.shareCode;
     }
 
-    if (shareCode == null) return null;
-
-    // Generate deep link using custom URL scheme
-    // This directly opens the app if installed
-    return 'travelyari://join?code=$shareCode';
+    // Generate new share code
+    return await _syncService.shareTrip(trip.id);
   }
 
-  /// Generate invite message with link
-  String generateInviteMessage(Trip trip, String inviteLink) {
-    return '''
-Join my trip "${trip.name}" on Yatra Planner!
+  /// Generate a shareable invite link for a trip
+  /// Uses Firebase Hosting URL which is clickable AND opens the app via App Links
+  String generateInviteLink(String shareCode) {
+    return 'https://$_hostingDomain/join?code=$shareCode';
+  }
 
-Click to join: $inviteLink
+  /// Generate invite message with clickable link
+  String generateInviteMessage(Trip trip, String shareCode) {
+    final link = generateInviteLink(shareCode);
+    return '''Join my trip "${trip.name}" on Yatra Planner!
 
-Download Yatra Planner to collaborate on trip planning.
-''';
+$link
+
+Or enter code manually: *$shareCode*''';
   }
 
   /// Share invite via system share sheet
   Future<void> shareInvite(Trip trip) async {
-    final inviteLink = await generateInviteLink(trip);
-    if (inviteLink == null) {
-      debugPrint('Failed to generate invite link');
+    final shareCode = await getShareCode(trip);
+    if (shareCode == null) {
+      debugPrint('Failed to generate share code');
       return;
     }
 
-    final message = generateInviteMessage(trip, inviteLink);
+    final message = generateInviteMessage(trip, shareCode);
     await Share.share(message, subject: 'Join my trip: ${trip.name}');
   }
 
   /// Send invite via WhatsApp to a specific number
   Future<bool> sendWhatsAppInvite(Trip trip, String phoneNumber) async {
-    final inviteLink = await generateInviteLink(trip);
-    if (inviteLink == null) return false;
+    final shareCode = await getShareCode(trip);
+    if (shareCode == null) return false;
 
-    final message = generateInviteMessage(trip, inviteLink);
+    final message = generateInviteMessage(trip, shareCode);
     final encodedMessage = Uri.encodeComponent(message);
 
     // Clean and normalize phone number for wa.me (requires country code)
@@ -98,10 +103,10 @@ Download Yatra Planner to collaborate on trip planning.
 
   /// Send invite via SMS
   Future<bool> sendSmsInvite(Trip trip, String phoneNumber) async {
-    final inviteLink = await generateInviteLink(trip);
-    if (inviteLink == null) return false;
+    final shareCode = await getShareCode(trip);
+    if (shareCode == null) return false;
 
-    final message = generateInviteMessage(trip, inviteLink);
+    final message = generateInviteMessage(trip, shareCode);
     final encodedMessage = Uri.encodeComponent(message);
 
     // Clean phone number (keep original format for SMS, just remove spaces)
@@ -121,11 +126,11 @@ Download Yatra Planner to collaborate on trip planning.
 
   /// Send invite via email
   Future<bool> sendEmailInvite(Trip trip, String email, {String? name}) async {
-    final inviteLink = await generateInviteLink(trip);
-    if (inviteLink == null) return false;
+    final shareCode = await getShareCode(trip);
+    if (shareCode == null) return false;
 
     final subject = Uri.encodeComponent('Join my trip: ${trip.name}');
-    final body = Uri.encodeComponent(generateInviteMessage(trip, inviteLink));
+    final body = Uri.encodeComponent(generateInviteMessage(trip, shareCode));
 
     final emailUrl = 'mailto:$email?subject=$subject&body=$body';
     final uri = Uri.parse(emailUrl);
@@ -137,6 +142,24 @@ Download Yatra Planner to collaborate on trip planning.
       debugPrint('Failed to open email: $e');
       return false;
     }
+  }
+
+  /// Add contacts as trip participants directly in-app
+  Future<Trip?> addContactsAsParticipants(Trip trip, List<ContactInfo> contacts) async {
+    if (contacts.isEmpty) return null;
+
+    const uuid = Uuid();
+    final participants = contacts.map((contact) {
+      return TripParticipant(
+        id: uuid.v4(),
+        name: contact.name,
+        phone: contact.phone,
+        email: contact.email,
+        role: ParticipantRole.editor,
+      );
+    }).toList();
+
+    return await _syncService.addParticipants(trip.id, participants);
   }
 
   /// Parse share code from an invite link
