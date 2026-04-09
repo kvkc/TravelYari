@@ -200,10 +200,12 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       final user = _authService.currentUser;
       final currentTrip = StorageService.getTrip(tripId) ?? trip;
 
-      // Add owner as first participant if not already present
+      // Add current user as participant if not already present
+      // Only set role as owner if trip has no owner yet
       var participants = List<TripParticipant>.from(currentTrip.participants);
-      final ownerExists = participants.any((p) => p.userId == userId);
-      if (!ownerExists && userId != null) {
+      final alreadyParticipant = participants.any((p) => p.userId == userId);
+      if (!alreadyParticipant && userId != null) {
+        final hasOwner = participants.any((p) => p.role == ParticipantRole.owner);
         participants.insert(
           0,
           TripParticipant(
@@ -212,7 +214,7 @@ class TripSyncService extends StateNotifier<TripSyncState> {
             name: user?.displayName ?? 'Me',
             phone: user?.phoneNumber,
             email: user?.email,
-            role: ParticipantRole.owner,
+            role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
           ),
         );
       }
@@ -497,16 +499,14 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final localTrip = StorageService.getTrip(tripId);
     if (localTrip == null) return;
 
-    // Auto-apply changes from other participants
-    if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
-      final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
-      await StorageService.saveTrip(syncedTrip);
+    // Always apply remote changes to keep local storage in sync
+    // This ensures participants, locations, and all other fields
+    // stay up-to-date regardless of who made the change
+    final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+    await StorageService.saveTrip(syncedTrip);
 
-      // Notify listening screens
-      _tripUpdateController.add(syncedTrip);
-
-      debugPrint('Remote changes auto-applied for trip: $tripId');
-    }
+    // Notify listening screens
+    _tripUpdateController.add(syncedTrip);
   }
 
   /// Sync all pending local changes
