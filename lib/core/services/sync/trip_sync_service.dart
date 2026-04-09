@@ -484,28 +484,13 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   }
 
   void _handleRemoteTripChange(String tripId, Trip remoteTrip) async {
-    // Always save Firestore state to local storage (Firestore is source of truth)
+    // Skip our own echoes — local storage already has our latest data
+    if (remoteTrip.lastModifiedBy == _authService.currentUserId) return;
+
+    // Apply other user's changes to local storage and notify screens
     final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
     await StorageService.saveTrip(syncedTrip);
-
-    // Always notify screens so they can refresh
     _tripUpdateController.add(syncedTrip);
-  }
-
-  /// Get the latest trip from Firestore (for shared trips) or storage (for local)
-  Future<Trip?> getLatestTrip(String tripId) async {
-    if (isSyncAvailable) {
-      final localTrip = StorageService.getTrip(tripId);
-      if (localTrip != null && localTrip.isShared) {
-        final remoteTrip = await _firestoreService.getTrip(tripId);
-        if (remoteTrip != null) {
-          final synced = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
-          await StorageService.saveTrip(synced);
-          return synced;
-        }
-      }
-    }
-    return StorageService.getTrip(tripId);
   }
 
   /// Sync all pending local changes
