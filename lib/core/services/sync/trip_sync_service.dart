@@ -114,13 +114,8 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       final success = await _firestoreService.saveTrip(tripToSync, userId);
 
       if (success) {
-        // Read back from Firestore to get the merged result
-        // (transaction may have merged participants from remote)
-        final mergedTrip = await _firestoreService.getTrip(trip.id);
-        final syncedTrip = (mergedTrip ?? tripToSync).copyWith(
-          lastSyncedAt: DateTime.now(),
-          lastModifiedBy: userId,
-        );
+        // Update local trip with sync time
+        final syncedTrip = tripToSync.copyWith(lastSyncedAt: DateTime.now());
         await StorageService.saveTrip(syncedTrip);
 
         // Start listening for changes to this trip
@@ -185,13 +180,37 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final shareCode = await _firestoreService.generateShareCode(tripId);
 
     if (shareCode != null) {
-      // Update local trip with share code - get fresh copy after sync
+      final userId = _authService.currentUserId;
+      final user = _authService.currentUser;
       final currentTrip = StorageService.getTrip(tripId) ?? trip;
+
+      // Add owner as first participant if not already present
+      var participants = List<TripParticipant>.from(currentTrip.participants);
+      final ownerExists = participants.any((p) => p.userId == userId);
+      if (!ownerExists && userId != null) {
+        participants.insert(
+          0,
+          TripParticipant(
+            id: userId,
+            userId: userId,
+            name: user?.displayName ?? 'Me',
+            phone: user?.phoneNumber,
+            email: user?.email,
+            role: ParticipantRole.owner,
+          ),
+        );
+      }
+
       final updatedTrip = currentTrip.copyWith(
         shareCode: shareCode,
         isShared: true,
+        participants: participants,
+        participantIds: [...currentTrip.participantIds, if (userId != null && !currentTrip.participantIds.contains(userId)) userId],
       );
       await StorageService.saveTrip(updatedTrip);
+
+      // Sync the trip with owner participant to Firestore
+      await syncTrip(updatedTrip);
 
       // Always ensure we're subscribed to changes for this shared trip
       _subscribeToTrip(tripId);

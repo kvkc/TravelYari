@@ -24,53 +24,27 @@ class FirestoreService {
 
   // ============ TRIP OPERATIONS ============
 
-  /// Save/update a trip to Firestore using a transaction to prevent
-  /// overwriting participants and participantIds from other users
+  /// Save/update a trip to Firestore
+  /// Protects participants from being overwritten by empty arrays
   Future<bool> saveTrip(Trip trip, String userId) async {
-    if (_tripsCollection == null || _firestore == null) return false;
+    if (_tripsCollection == null) return false;
 
     try {
-      final docRef = _tripsCollection!.doc(trip.id);
+      final tripData = trip.toJson();
+      tripData['ownerId'] = userId;
+      tripData['lastModifiedBy'] = userId;
+      tripData['lastModifiedAt'] = FieldValue.serverTimestamp();
 
-      await _firestore!.runTransaction((transaction) async {
-        final snapshot = await transaction.get(docRef);
+      // Don't overwrite remote participants/participantIds with empty arrays
+      // merge:true preserves fields not present in the data
+      if ((tripData['participants'] as List).isEmpty) {
+        tripData.remove('participants');
+      }
+      if ((tripData['participantIds'] as List).isEmpty) {
+        tripData.remove('participantIds');
+      }
 
-        final tripData = trip.toJson();
-        tripData['ownerId'] = userId;
-        tripData['lastModifiedBy'] = userId;
-        tripData['lastModifiedAt'] = FieldValue.serverTimestamp();
-
-        // Merge participants and participantIds with remote to prevent overwrites
-        if (snapshot.exists && snapshot.data() != null) {
-          final remoteData = snapshot.data()!;
-
-          // Union participants by id
-          final localParticipants = (tripData['participants'] as List?) ?? [];
-          final remoteParticipants = (remoteData['participants'] as List?) ?? [];
-          final merged = <String, dynamic>{};
-          for (final p in remoteParticipants) {
-            if (p is Map && p['id'] != null) merged[p['id'].toString()] = p;
-          }
-          for (final p in localParticipants) {
-            if (p is Map && p['id'] != null) merged[p['id'].toString()] = p;
-          }
-          tripData['participants'] = merged.values.toList();
-
-          // Union participantIds
-          final localIds = Set<String>.from(tripData['participantIds'] ?? []);
-          final remoteIds = Set<String>.from(remoteData['participantIds'] ?? []);
-          tripData['participantIds'] = localIds.union(remoteIds).toList();
-
-          // Preserve isShared and shareCode if set remotely
-          if (remoteData['isShared'] == true) tripData['isShared'] = true;
-          if (remoteData['shareCode'] != null && tripData['shareCode'] == null) {
-            tripData['shareCode'] = remoteData['shareCode'];
-          }
-        }
-
-        transaction.set(docRef, tripData);
-      });
-
+      await _tripsCollection!.doc(trip.id).set(tripData, SetOptions(merge: true));
       debugPrint('Trip saved to Firestore: ${trip.id}');
       return true;
     } catch (e) {
