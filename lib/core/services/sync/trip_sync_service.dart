@@ -184,56 +184,44 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final userId = _authService.currentUserId;
     final user = _authService.currentUser;
 
-    // Step 1: Add owner as participant FIRST (before any sync)
-    var participants = List<TripParticipant>.from(trip.participants);
-    final alreadyParticipant = participants.any((p) => p.userId == userId);
-    if (!alreadyParticipant && userId != null) {
-      final hasOwner = participants.any((p) => p.role == ParticipantRole.owner);
-      participants.insert(
-        0,
-        TripParticipant(
-          id: userId,
-          userId: userId,
-          name: user?.displayName ?? 'Me',
-          phone: user?.phoneNumber,
-          email: user?.email,
-          role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
-        ),
-      );
+    // Reuse existing share code if available
+    final existingCode = trip.shareCode;
+    if (existingCode != null && existingCode.isNotEmpty) {
+      _subscribeToTrip(tripId);
+      return existingCode;
     }
 
-    // Step 2: Sync trip with owner participant to Firestore
-    // (creates the document if it doesn't exist yet)
+    // Add owner as participant
+    var participants = List<TripParticipant>.from(trip.participants);
+    if (userId != null && !participants.any((p) => p.userId == userId)) {
+      final hasOwner = participants.any((p) => p.role == ParticipantRole.owner);
+      participants.insert(0, TripParticipant(
+        id: userId,
+        userId: userId,
+        name: user?.displayName ?? 'Me',
+        phone: user?.phoneNumber,
+        email: user?.email,
+        role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
+      ));
+    }
+
+    // Build complete trip with owner, sync to create Firestore document
     final tripWithOwner = trip.copyWith(
+      isShared: true,
       participants: participants,
       participantIds: [...trip.participantIds, if (userId != null && !trip.participantIds.contains(userId)) userId],
     );
     await syncTrip(tripWithOwner);
 
-    // Step 3: Reuse existing share code or generate new one
-    // (generateShareCode uses .update() so document must exist first)
-    final existingCode = trip.shareCode;
-    final shareCode = (existingCode != null && existingCode.isNotEmpty)
-        ? existingCode
-        : await _firestoreService.generateShareCode(tripId);
-
+    // Generate share code (document now exists)
+    final shareCode = await _firestoreService.generateShareCode(tripId);
     if (shareCode == null) return null;
 
-    // Step 4: Save the final shared trip with code
-    final sharedTrip = tripWithOwner.copyWith(
-      shareCode: shareCode,
-      isShared: true,
-      participants: participants,
-      participantIds: [...trip.participantIds, if (userId != null && !trip.participantIds.contains(userId)) userId],
-    );
+    // Save locally with code (NO second sync — generateShareCode already updated Firestore)
+    final sharedTrip = tripWithOwner.copyWith(shareCode: shareCode);
     await StorageService.saveTrip(sharedTrip);
 
-    // Step 5: Sync final version with share code to Firestore
-    await syncTrip(sharedTrip);
-
-    // Step 6: Subscribe to changes
     _subscribeToTrip(tripId);
-
     return shareCode;
   }
 
