@@ -51,12 +51,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
       if (updatedTrip.id == _trip.id && mounted) {
         setState(() {
-          // Merge: take remote content but preserve any unsaved local edits
-          // by reading the latest from storage (which _handleRemoteTripChange updated)
-          final latest = StorageService.getTrip(_trip.id);
-          if (latest != null) {
-            _trip = latest;
-          }
+          _trip = updatedTrip;
         });
       }
     });
@@ -160,24 +155,15 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   Future<void> _saveTrip() async {
-    // Merge with latest storage to preserve remote changes (participants, etc.)
-    final latest = StorageService.getTrip(_trip.id);
-    if (latest != null) {
-      _trip = _trip.copyWith(
-        participants: latest.participants,
-        participantIds: latest.participantIds,
-        shareCode: latest.shareCode,
-        isShared: latest.isShared || _trip.isShared,
-      );
-    }
     await StorageService.saveTrip(_trip);
     final syncService = ref.read(tripSyncServiceProvider.notifier);
     syncService.syncIfShared(_trip);
   }
 
-  /// Refresh _trip from storage to pick up any remote changes
-  void _refreshTrip() {
-    final latest = StorageService.getTrip(_trip.id);
+  /// Refresh _trip from Firestore (shared) or storage (local)
+  Future<void> _refreshTrip() async {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    final latest = await syncService.getLatestTrip(_trip.id);
     if (latest != null) _trip = latest;
   }
 
@@ -203,7 +189,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     );
 
     if (result != null && result is TripLocation) {
-      _refreshTrip();
+      await _refreshTrip();
       setState(() {
         _trip = _trip.copyWith(
           locations: [..._trip.locations, result],
@@ -215,7 +201,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   void _removeLocation(int index) async {
-    _refreshTrip();
+    await _refreshTrip();
     setState(() {
       final locations = List<TripLocation>.from(_trip.locations);
       locations.removeAt(index);
@@ -226,7 +212,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   void _reorderLocations(int oldIndex, int newIndex) async {
-    _refreshTrip();
+    await _refreshTrip();
     setState(() {
       if (newIndex > oldIndex) newIndex--;
       final locations = List<TripLocation>.from(_trip.locations);
@@ -282,7 +268,7 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   }
 
   Future<void> _planTrip() async {
-    _refreshTrip();
+    await _refreshTrip();
     if (_trip.locations.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -439,9 +425,9 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               if (controller.text.isNotEmpty) {
-                _refreshTrip();
+                await _refreshTrip();
                 setState(() {
                   _trip = _trip.copyWith(name: controller.text);
                 });

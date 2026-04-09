@@ -49,17 +49,13 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
       if (updatedTrip.id == widget.tripId && mounted) {
         setState(() {
-          // Read from storage which _handleRemoteTripChange already updated
-          final latest = StorageService.getTrip(widget.tripId);
-          if (latest != null) {
-            _trip = latest;
-            if (latest.dayPlans.length + 1 != _tabController.length) {
-              _tabController.dispose();
-              _tabController = TabController(
-                length: latest.dayPlans.length + 1,
-                vsync: this,
-              );
-            }
+          _trip = updatedTrip;
+          if (updatedTrip.dayPlans.length + 1 != _tabController.length) {
+            _tabController.dispose();
+            _tabController = TabController(
+              length: updatedTrip.dayPlans.length + 1,
+              vsync: this,
+            );
           }
         });
       }
@@ -467,8 +463,8 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     _updateDayPlanStay(dayIndex, null);
   }
 
-  void _updateDayPlanStay(int dayIndex, Amenity? newStay) {
-    _refreshTrip();
+  void _updateDayPlanStay(int dayIndex, Amenity? newStay) async {
+    await _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
       stayOption: newStay,
@@ -496,8 +492,8 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     );
   }
 
-  void _updateStop(int dayIndex, int stopIndex, PlannedStop updatedStop) {
-    _refreshTrip();
+  void _updateStop(int dayIndex, int stopIndex, PlannedStop updatedStop) async {
+    await _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops[stopIndex] = updatedStop;
@@ -537,8 +533,8 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     }
   }
 
-  void _removeStop(int dayIndex, int stopIndex) {
-    _refreshTrip();
+  void _removeStop(int dayIndex, int stopIndex) async {
+    await _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops.removeAt(stopIndex);
@@ -558,23 +554,14 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     );
   }
 
-  /// Refresh _trip from storage to pick up any remote changes
-  void _refreshTrip() {
-    final latest = StorageService.getTrip(widget.tripId);
+  /// Refresh _trip from Firestore (shared) or storage (local)
+  Future<void> _refreshTrip() async {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    final latest = await syncService.getLatestTrip(widget.tripId);
     if (latest != null) _trip = latest;
   }
 
   Future<void> _saveAndUpdateTrip(Trip updatedTrip) async {
-    // Merge with latest storage to preserve remote changes (participants, etc.)
-    final latest = StorageService.getTrip(updatedTrip.id);
-    if (latest != null) {
-      updatedTrip = updatedTrip.copyWith(
-        participants: latest.participants,
-        participantIds: latest.participantIds,
-        shareCode: latest.shareCode,
-        isShared: latest.isShared || updatedTrip.isShared,
-      );
-    }
     await StorageService.saveTrip(updatedTrip);
     setState(() {
       _trip = updatedTrip;

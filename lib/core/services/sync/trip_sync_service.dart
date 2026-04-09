@@ -181,58 +181,49 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final trip = StorageService.getTrip(tripId);
     if (trip == null) return null;
 
-    // Only sync if trip hasn't been synced recently or has pending changes
-    final needsSync = trip.lastSyncedAt == null ||
-        state.pendingChanges.contains(tripId);
+    final userId = _authService.currentUserId;
+    final user = _authService.currentUser;
 
-    if (needsSync) {
-      await syncTrip(trip);
+    // Step 1: Add owner as participant FIRST (before any sync)
+    var participants = List<TripParticipant>.from(trip.participants);
+    final alreadyParticipant = participants.any((p) => p.userId == userId);
+    if (!alreadyParticipant && userId != null) {
+      final hasOwner = participants.any((p) => p.role == ParticipantRole.owner);
+      participants.insert(
+        0,
+        TripParticipant(
+          id: userId,
+          userId: userId,
+          name: user?.displayName ?? 'Me',
+          phone: user?.phoneNumber,
+          email: user?.email,
+          role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
+        ),
+      );
     }
 
-    // Reuse existing share code or generate new one
-    final existingCode = StorageService.getTrip(tripId)?.shareCode;
+    // Step 2: Reuse existing share code or generate new one
+    final existingCode = trip.shareCode;
     final shareCode = (existingCode != null && existingCode.isNotEmpty)
         ? existingCode
         : await _firestoreService.generateShareCode(tripId);
 
-    if (shareCode != null) {
-      final userId = _authService.currentUserId;
-      final user = _authService.currentUser;
-      final currentTrip = StorageService.getTrip(tripId) ?? trip;
+    if (shareCode == null) return null;
 
-      // Add current user as participant if not already present
-      // Only set role as owner if trip has no owner yet
-      var participants = List<TripParticipant>.from(currentTrip.participants);
-      final alreadyParticipant = participants.any((p) => p.userId == userId);
-      if (!alreadyParticipant && userId != null) {
-        final hasOwner = participants.any((p) => p.role == ParticipantRole.owner);
-        participants.insert(
-          0,
-          TripParticipant(
-            id: userId,
-            userId: userId,
-            name: user?.displayName ?? 'Me',
-            phone: user?.phoneNumber,
-            email: user?.email,
-            role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
-          ),
-        );
-      }
+    // Step 3: Build the complete shared trip with owner + code
+    final sharedTrip = trip.copyWith(
+      shareCode: shareCode,
+      isShared: true,
+      participants: participants,
+      participantIds: [...trip.participantIds, if (userId != null && !trip.participantIds.contains(userId)) userId],
+    );
+    await StorageService.saveTrip(sharedTrip);
 
-      final updatedTrip = currentTrip.copyWith(
-        shareCode: shareCode,
-        isShared: true,
-        participants: participants,
-        participantIds: [...currentTrip.participantIds, if (userId != null && !currentTrip.participantIds.contains(userId)) userId],
-      );
-      await StorageService.saveTrip(updatedTrip);
+    // Step 4: Sync ONCE with everything (owner + code + trip data)
+    await syncTrip(sharedTrip);
 
-      // Sync the trip with owner participant to Firestore
-      await syncTrip(updatedTrip);
-
-      // Always ensure we're subscribed to changes for this shared trip
-      _subscribeToTrip(tripId);
-    }
+    // Step 5: Subscribe to changes
+    _subscribeToTrip(tripId);
 
     return shareCode;
   }
@@ -496,33 +487,28 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   }
 
   void _handleRemoteTripChange(String tripId, Trip remoteTrip) async {
-    final localTrip = StorageService.getTrip(tripId);
-    if (localTrip == null) return;
+    // Always save Firestore state to local storage (Firestore is source of truth)
+    final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+    await StorageService.saveTrip(syncedTrip);
 
-    if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
-      // Change from ANOTHER participant — apply their full trip
-      final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
-      await StorageService.saveTrip(syncedTrip);
-      _tripUpdateController.add(syncedTrip);
-      debugPrint('Remote trip changes applied from: ${remoteTrip.lastModifiedBy}');
-    } else {
-      // Our OWN change echoed back — only merge collaboration fields
-      // (participants, participantIds, shareCode, isShared) into local trip
-      // to pick up any server-side merges without overwriting local content
-      final mergedTrip = localTrip.copyWith(
-        participants: remoteTrip.participants,
-        participantIds: remoteTrip.participantIds,
-        shareCode: remoteTrip.shareCode,
-        isShared: remoteTrip.isShared,
-        lastSyncedAt: DateTime.now(),
-      );
-      if (mergedTrip.participants.length != localTrip.participants.length ||
-          mergedTrip.participantIds.length != localTrip.participantIds.length) {
-        await StorageService.saveTrip(mergedTrip);
-        _tripUpdateController.add(mergedTrip);
-        debugPrint('Collaboration fields merged from own echo');
+    // Always notify screens so they can refresh
+    _tripUpdateController.add(syncedTrip);
+  }
+
+  /// Get the latest trip from Firestore (for shared trips) or storage (for local)
+  Future<Trip?> getLatestTrip(String tripId) async {
+    if (isSyncAvailable) {
+      final localTrip = StorageService.getTrip(tripId);
+      if (localTrip != null && localTrip.isShared) {
+        final remoteTrip = await _firestoreService.getTrip(tripId);
+        if (remoteTrip != null) {
+          final synced = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+          await StorageService.saveTrip(synced);
+          return synced;
+        }
       }
     }
+    return StorageService.getTrip(tripId);
   }
 
   /// Sync all pending local changes

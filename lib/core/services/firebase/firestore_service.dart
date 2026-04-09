@@ -24,8 +24,8 @@ class FirestoreService {
 
   // ============ TRIP OPERATIONS ============
 
-  /// Save/update a trip to Firestore
-  /// Protects participants from being overwritten by empty arrays
+  /// Save/update a full trip to Firestore (used for share/join only)
+  /// Content edits use updateTripContent() instead
   Future<bool> saveTrip(Trip trip, String userId) async {
     if (_tripsCollection == null) return false;
 
@@ -34,15 +34,6 @@ class FirestoreService {
       tripData['ownerId'] = userId;
       tripData['lastModifiedBy'] = userId;
       tripData['lastModifiedAt'] = FieldValue.serverTimestamp();
-
-      // Don't overwrite remote participants/participantIds with empty arrays
-      // merge:true preserves fields not present in the data
-      if ((tripData['participants'] as List).isEmpty) {
-        tripData.remove('participants');
-      }
-      if ((tripData['participantIds'] as List).isEmpty) {
-        tripData.remove('participantIds');
-      }
 
       await _tripsCollection!.doc(trip.id).set(tripData, SetOptions(merge: true));
       debugPrint('Trip saved to Firestore: ${trip.id}');
