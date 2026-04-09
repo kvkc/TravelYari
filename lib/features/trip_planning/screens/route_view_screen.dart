@@ -72,6 +72,27 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
           vsync: this,
         );
       });
+      // For shared trips, fetch latest from Firestore on screen open
+      if (trip.isShared) {
+        _fetchLatestFromCloud();
+      }
+    }
+  }
+
+  Future<void> _fetchLatestFromCloud() async {
+    final syncService = ref.read(tripSyncServiceProvider.notifier);
+    final remoteTrip = await syncService.refreshTrip(widget.tripId);
+    if (remoteTrip != null && mounted) {
+      setState(() {
+        _trip = remoteTrip;
+        if (remoteTrip.dayPlans.length + 1 != _tabController.length) {
+          _tabController.dispose();
+          _tabController = TabController(
+            length: remoteTrip.dayPlans.length + 1,
+            vsync: this,
+          );
+        }
+      });
     }
   }
 
@@ -464,7 +485,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _updateDayPlanStay(int dayIndex, Amenity? newStay) async {
-    await _refreshTrip();
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     updatedDayPlans[dayIndex] = updatedDayPlans[dayIndex].copyWith(
       stayOption: newStay,
@@ -493,7 +514,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _updateStop(int dayIndex, int stopIndex, PlannedStop updatedStop) async {
-    await _refreshTrip();
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops[stopIndex] = updatedStop;
@@ -534,7 +555,7 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
   }
 
   void _removeStop(int dayIndex, int stopIndex) async {
-    await _refreshTrip();
+    _refreshTrip();
     final updatedDayPlans = List<DayPlan>.from(_trip!.dayPlans);
     final updatedStops = List<PlannedStop>.from(updatedDayPlans[dayIndex].stops);
     updatedStops.removeAt(stopIndex);
@@ -554,10 +575,9 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     );
   }
 
-  /// Refresh _trip from Firestore (shared) or storage (local)
-  Future<void> _refreshTrip() async {
-    final syncService = ref.read(tripSyncServiceProvider.notifier);
-    final latest = await syncService.getLatestTrip(widget.tripId);
+  /// Refresh _trip from local storage (kept in sync by Firestore stream)
+  void _refreshTrip() {
+    final latest = StorageService.getTrip(widget.tripId);
     if (latest != null) _trip = latest;
   }
 
