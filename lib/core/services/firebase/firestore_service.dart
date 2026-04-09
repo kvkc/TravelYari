@@ -53,6 +53,35 @@ class FirestoreService {
     }
   }
 
+  /// Update only trip content fields (never overwrites participants/sharing)
+  Future<bool> updateTripContent(String tripId, Trip trip, String userId) async {
+    if (_tripsCollection == null) return false;
+
+    try {
+      await _tripsCollection!.doc(tripId).update({
+        'name': trip.name,
+        'locations': trip.locations.map((l) => l.toJson()).toList(),
+        'optimizedRoute': trip.optimizedRoute.map((l) => l.toJson()).toList(),
+        'routeSegments': trip.routeSegments.map((r) => r.toJson()).toList(),
+        'dayPlans': trip.dayPlans.map((d) => d.toJson()).toList(),
+        'status': trip.status.name,
+        'vehicleType': trip.vehicleType.name,
+        'totalDistanceKm': trip.totalDistanceKm,
+        'estimatedDurationMinutes': trip.estimatedDurationMinutes,
+        'startDate': trip.startDate?.toIso8601String(),
+        'updatedAt': trip.updatedAt.toIso8601String(),
+        'preferences': trip.preferences.toJson(),
+        'lastModifiedBy': userId,
+        'lastModifiedAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('Trip content updated in Firestore: $tripId');
+      return true;
+    } catch (e) {
+      debugPrint('Failed to update trip content: $e');
+      return false;
+    }
+  }
+
   /// Get a trip by ID
   Future<Trip?> getTrip(String tripId) async {
     if (_tripsCollection == null) return null;

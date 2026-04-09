@@ -152,13 +152,26 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     );
   }
 
-  /// Sync a trip to cloud if it's shared (call after local edits)
+  /// Sync only trip content to cloud (never overwrites participants/sharing)
+  /// Use this for regular edits (add location, plan trip, rename, etc.)
   Future<void> syncIfShared(Trip trip) async {
     if (!isSyncAvailable) return;
-    // Read fresh from storage — screen's trip object may be stale
     final currentTrip = StorageService.getTrip(trip.id) ?? trip;
     if (!currentTrip.isShared) return;
-    await syncTrip(currentTrip);
+
+    final userId = _authService.currentUserId;
+    if (userId == null) return;
+
+    final success = await _firestoreService.updateTripContent(
+      currentTrip.id,
+      currentTrip,
+      userId,
+    );
+
+    if (success) {
+      _subscribeToTrip(currentTrip.id);
+      debugPrint('Trip content synced: ${currentTrip.id}');
+    }
   }
 
   /// Share a trip and get share code
