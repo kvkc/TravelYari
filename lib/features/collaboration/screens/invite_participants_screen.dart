@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/trip.dart';
@@ -46,8 +47,10 @@ class _InviteParticipantsScreenState
   }
 
   void _shareInvite() {
+    if (_shareCode == null) return;
     final inviteService = ref.read(inviteServiceProvider);
-    inviteService.shareInvite(widget.trip);
+    final message = inviteService.generateInviteMessage(widget.trip, _shareCode!);
+    Share.share(message, subject: 'Join my trip: ${widget.trip.name}');
   }
 
   void _copyLink() {

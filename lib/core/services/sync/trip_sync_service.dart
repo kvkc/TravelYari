@@ -189,8 +189,11 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       await syncTrip(trip);
     }
 
-    // Generate share code
-    final shareCode = await _firestoreService.generateShareCode(tripId);
+    // Reuse existing share code or generate new one
+    final existingCode = StorageService.getTrip(tripId)?.shareCode;
+    final shareCode = (existingCode != null && existingCode.isNotEmpty)
+        ? existingCode
+        : await _firestoreService.generateShareCode(tripId);
 
     if (shareCode != null) {
       final userId = _authService.currentUserId;
