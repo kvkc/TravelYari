@@ -51,7 +51,12 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
       if (updatedTrip.id == _trip.id && mounted) {
         setState(() {
-          _trip = updatedTrip;
+          // Merge: take remote content but preserve any unsaved local edits
+          // by reading the latest from storage (which _handleRemoteTripChange updated)
+          final latest = StorageService.getTrip(_trip.id);
+          if (latest != null) {
+            _trip = latest;
+          }
         });
       }
     });

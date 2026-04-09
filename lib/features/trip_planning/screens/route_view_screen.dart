@@ -49,14 +49,17 @@ class _RouteViewScreenState extends ConsumerState<RouteViewScreen>
     _remoteTripSubscription = syncService.tripUpdates.listen((updatedTrip) {
       if (updatedTrip.id == widget.tripId && mounted) {
         setState(() {
-          _trip = updatedTrip;
-          // Reinitialize tab controller if day plan count changed
-          if (updatedTrip.dayPlans.length + 1 != _tabController.length) {
-            _tabController.dispose();
-            _tabController = TabController(
-              length: updatedTrip.dayPlans.length + 1,
-              vsync: this,
-            );
+          // Read from storage which _handleRemoteTripChange already updated
+          final latest = StorageService.getTrip(widget.tripId);
+          if (latest != null) {
+            _trip = latest;
+            if (latest.dayPlans.length + 1 != _tabController.length) {
+              _tabController.dispose();
+              _tabController = TabController(
+                length: latest.dayPlans.length + 1,
+                vsync: this,
+              );
+            }
           }
         });
       }

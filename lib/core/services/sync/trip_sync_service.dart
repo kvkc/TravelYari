@@ -499,14 +499,30 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final localTrip = StorageService.getTrip(tripId);
     if (localTrip == null) return;
 
-    // Always apply remote changes to keep local storage in sync
-    // This ensures participants, locations, and all other fields
-    // stay up-to-date regardless of who made the change
-    final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
-    await StorageService.saveTrip(syncedTrip);
-
-    // Notify listening screens
-    _tripUpdateController.add(syncedTrip);
+    if (remoteTrip.lastModifiedBy != _authService.currentUserId) {
+      // Change from ANOTHER participant — apply their full trip
+      final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());
+      await StorageService.saveTrip(syncedTrip);
+      _tripUpdateController.add(syncedTrip);
+      debugPrint('Remote trip changes applied from: ${remoteTrip.lastModifiedBy}');
+    } else {
+      // Our OWN change echoed back — only merge collaboration fields
+      // (participants, participantIds, shareCode, isShared) into local trip
+      // to pick up any server-side merges without overwriting local content
+      final mergedTrip = localTrip.copyWith(
+        participants: remoteTrip.participants,
+        participantIds: remoteTrip.participantIds,
+        shareCode: remoteTrip.shareCode,
+        isShared: remoteTrip.isShared,
+        lastSyncedAt: DateTime.now(),
+      );
+      if (mergedTrip.participants.length != localTrip.participants.length ||
+          mergedTrip.participantIds.length != localTrip.participantIds.length) {
+        await StorageService.saveTrip(mergedTrip);
+        _tripUpdateController.add(mergedTrip);
+        debugPrint('Collaboration fields merged from own echo');
+      }
+    }
   }
 
   /// Sync all pending local changes
