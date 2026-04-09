@@ -202,7 +202,16 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       );
     }
 
-    // Step 2: Reuse existing share code or generate new one
+    // Step 2: Sync trip with owner participant to Firestore
+    // (creates the document if it doesn't exist yet)
+    final tripWithOwner = trip.copyWith(
+      participants: participants,
+      participantIds: [...trip.participantIds, if (userId != null && !trip.participantIds.contains(userId)) userId],
+    );
+    await syncTrip(tripWithOwner);
+
+    // Step 3: Reuse existing share code or generate new one
+    // (generateShareCode uses .update() so document must exist first)
     final existingCode = trip.shareCode;
     final shareCode = (existingCode != null && existingCode.isNotEmpty)
         ? existingCode
@@ -210,8 +219,8 @@ class TripSyncService extends StateNotifier<TripSyncState> {
 
     if (shareCode == null) return null;
 
-    // Step 3: Build the complete shared trip with owner + code
-    final sharedTrip = trip.copyWith(
+    // Step 4: Save the final shared trip with code
+    final sharedTrip = tripWithOwner.copyWith(
       shareCode: shareCode,
       isShared: true,
       participants: participants,
@@ -219,10 +228,10 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     );
     await StorageService.saveTrip(sharedTrip);
 
-    // Step 4: Sync ONCE with everything (owner + code + trip data)
+    // Step 5: Sync final version with share code to Firestore
     await syncTrip(sharedTrip);
 
-    // Step 5: Subscribe to changes
+    // Step 6: Subscribe to changes
     _subscribeToTrip(tripId);
 
     return shareCode;
