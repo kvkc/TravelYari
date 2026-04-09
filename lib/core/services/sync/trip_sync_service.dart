@@ -114,8 +114,13 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       final success = await _firestoreService.saveTrip(tripToSync, userId);
 
       if (success) {
-        // Update local trip with sync time
-        final syncedTrip = tripToSync.copyWith(lastSyncedAt: DateTime.now());
+        // Read back from Firestore to get the merged result
+        // (transaction may have merged participants from remote)
+        final mergedTrip = await _firestoreService.getTrip(trip.id);
+        final syncedTrip = (mergedTrip ?? tripToSync).copyWith(
+          lastSyncedAt: DateTime.now(),
+          lastModifiedBy: userId,
+        );
         await StorageService.saveTrip(syncedTrip);
 
         // Start listening for changes to this trip
@@ -187,6 +192,9 @@ class TripSyncService extends StateNotifier<TripSyncState> {
         isShared: true,
       );
       await StorageService.saveTrip(updatedTrip);
+
+      // Always ensure we're subscribed to changes for this shared trip
+      _subscribeToTrip(tripId);
     }
 
     return shareCode;
