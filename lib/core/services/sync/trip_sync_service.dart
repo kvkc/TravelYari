@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../features/expenses/models/expense.dart';
 import '../../../features/trip_planning/models/trip.dart';
@@ -65,6 +66,16 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   /// Stream that emits (tripId, expenses) when remote expense changes are applied
   Stream<(String, List<Expense>)> get expenseUpdates => _expenseUpdateController.stream;
 
+  /// Unique device ID for distinguishing sync echoes (persists across sessions)
+  static String get deviceId {
+    var id = StorageService.getSetting<String>('device_id');
+    if (id == null || id.isEmpty) {
+      id = const Uuid().v4();
+      StorageService.setSetting('device_id', id);
+    }
+    return id;
+  }
+
   TripSyncService({
     required FirestoreService firestoreService,
     required AuthService authService,
@@ -105,10 +116,10 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     state = state.copyWith(status: SyncStatus.syncing);
 
     try {
-      // Update owner if not set (copyWith always bumps updatedAt)
+      // Update owner if not set, use deviceId for lastModifiedBy
       final tripToSync = trip.ownerId == null
-          ? trip.copyWith(ownerId: userId, lastModifiedBy: userId)
-          : trip.copyWith(lastModifiedBy: userId);
+          ? trip.copyWith(ownerId: userId, lastModifiedBy: deviceId)
+          : trip.copyWith(lastModifiedBy: deviceId);
 
       // Save to Firestore
       final success = await _firestoreService.saveTrip(tripToSync, userId);
@@ -159,13 +170,10 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     final currentTrip = StorageService.getTrip(trip.id) ?? trip;
     if (!currentTrip.isShared) return;
 
-    final userId = _authService.currentUserId;
-    if (userId == null) return;
-
     final success = await _firestoreService.updateTripContent(
       currentTrip.id,
       currentTrip,
-      userId,
+      deviceId,
     );
 
     if (success) {
@@ -174,15 +182,14 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     }
   }
 
-  /// Share a trip and get share code
-  Future<String?> shareTrip(String tripId) async {
+  /// Share a trip and get share code. [ownerName] is the display name for the owner participant.
+  Future<String?> shareTrip(String tripId, {String? ownerName}) async {
     if (!isSyncAvailable) return null;
 
     final trip = StorageService.getTrip(tripId);
     if (trip == null) return null;
 
     final userId = _authService.currentUserId;
-    final user = _authService.currentUser;
 
     // Reuse existing share code if available
     final existingCode = trip.shareCode;
@@ -198,9 +205,7 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       participants.insert(0, TripParticipant(
         id: userId,
         userId: userId,
-        name: user?.displayName ?? 'Me',
-        phone: user?.phoneNumber,
-        email: user?.email,
+        name: ownerName ?? StorageService.getSetting<String>('user_name') ?? 'Trip Owner',
         role: hasOwner ? ParticipantRole.editor : ParticipantRole.owner,
       ));
     }
@@ -225,8 +230,8 @@ class TripSyncService extends StateNotifier<TripSyncState> {
     return shareCode;
   }
 
-  /// Join a trip using share code
-  Future<Trip?> joinTripByShareCode(String shareCode) async {
+  /// Join a trip using share code. [joinerName] is the display name for the joining participant.
+  Future<Trip?> joinTripByShareCode(String shareCode, {String? joinerName}) async {
     if (!isSyncAvailable) return null;
 
     final userId = _authService.currentUserId;
@@ -277,11 +282,12 @@ class TripSyncService extends StateNotifier<TripSyncState> {
       }
 
       // No match found — create a new participant entry
+      final displayName = joinerName ?? StorageService.getSetting<String>('user_name') ?? userName ?? 'Member';
       if (!matched) {
         updatedParticipants.add(TripParticipant(
           id: userId,
           userId: userId,
-          name: userName ?? 'Member',
+          name: displayName,
           phone: userPhone,
           email: user?.email,
           role: ParticipantRole.editor,
@@ -484,8 +490,8 @@ class TripSyncService extends StateNotifier<TripSyncState> {
   }
 
   void _handleRemoteTripChange(String tripId, Trip remoteTrip) async {
-    // Skip our own echoes — local storage already has our latest data
-    if (remoteTrip.lastModifiedBy == _authService.currentUserId) return;
+    // Skip our own echoes — compare against device ID, not Firebase UID
+    if (remoteTrip.lastModifiedBy == deviceId) return;
 
     // Apply other user's changes to local storage and notify screens
     final syncedTrip = remoteTrip.copyWith(lastSyncedAt: DateTime.now());

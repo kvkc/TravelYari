@@ -157,8 +157,8 @@ Or enter code manually: *$shareCode*''';
   }
 
   /// Join trip using share code
-  Future<Trip?> joinTripWithCode(String shareCode) async {
-    return await _syncService.joinTripByShareCode(shareCode);
+  Future<Trip?> joinTripWithCode(String shareCode, {String? joinerName}) async {
+    return await _syncService.joinTripByShareCode(shareCode, joinerName: joinerName);
   }
 }
 

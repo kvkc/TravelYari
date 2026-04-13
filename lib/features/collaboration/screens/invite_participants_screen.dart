@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/services/storage_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/trip.dart';
 import '../services/invite_service.dart';
@@ -33,6 +34,15 @@ class _InviteParticipantsScreenState
   }
 
   Future<void> _generateShareCode() async {
+    // Prompt for name if not set (first time sharing)
+    final savedName = StorageService.getSetting<String>('user_name');
+    if ((savedName == null || savedName.isEmpty) && mounted) {
+      final name = await _promptForName();
+      if (name != null && name.isNotEmpty) {
+        StorageService.setSetting('user_name', name);
+      }
+    }
+
     final inviteService = ref.read(inviteServiceProvider);
     final code = await inviteService.getShareCode(widget.trip);
     if (code != null && mounted) {
@@ -44,6 +54,32 @@ class _InviteParticipantsScreenState
     } else if (mounted) {
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<String?> _promptForName() async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Your Name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            hintText: 'Enter your name',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _shareInvite() {
