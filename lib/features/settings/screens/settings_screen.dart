@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/services/storage_service.dart';
@@ -354,11 +355,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _openPrivacyPolicy() {
-    // Open privacy policy URL
+  void _openPrivacyPolicy() async {
+    final uri = Uri.parse('https://yatraplanner-50f70.web.app/privacy.html');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open privacy policy')),
+        );
+      }
+    }
   }
 
-  void _openTermsOfService() {
-    // Open terms of service URL
+  void _openTermsOfService() async {
+    final uri = Uri.parse('https://yatraplanner-50f70.web.app/terms.html');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open terms of service')),
+        );
+      }
+    }
   }
 }

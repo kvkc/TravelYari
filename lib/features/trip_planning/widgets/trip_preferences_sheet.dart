@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../models/trip.dart';
+import '../models/vehicle.dart';
 
 class TripPreferencesSheet extends StatefulWidget {
   final TripPreferences preferences;
   final VehicleType vehicleType;
-  final Function(TripPreferences, VehicleType) onSave;
+  final List<Vehicle> vehicles;
+  final Function(TripPreferences, VehicleType, List<Vehicle>) onSave;
 
   const TripPreferencesSheet({
     super.key,
     required this.preferences,
     required this.vehicleType,
+    this.vehicles = const [],
     required this.onSave,
   });
 
@@ -22,12 +25,76 @@ class TripPreferencesSheet extends StatefulWidget {
 class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
   late TripPreferences _preferences;
   late VehicleType _vehicleType;
+  late List<Vehicle> _vehicles;
+
+  // Controllers for vehicle input
+  final _tankCapacityController = TextEditingController();
+  final _mileageController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _preferences = widget.preferences;
     _vehicleType = widget.vehicleType;
+    _vehicles = List.from(widget.vehicles);
+
+    // Initialize with first vehicle or defaults
+    if (_vehicles.isNotEmpty) {
+      _tankCapacityController.text = _vehicles.first.tankCapacityLiters.toStringAsFixed(0);
+      _mileageController.text = _vehicles.first.mileage.toStringAsFixed(1);
+    } else {
+      // Set defaults based on vehicle type
+      _setDefaultVehicleValues();
+    }
+  }
+
+  void _setDefaultVehicleValues() {
+    switch (_vehicleType) {
+      case VehicleType.car:
+        _tankCapacityController.text = '45';
+        _mileageController.text = '15';
+        break;
+      case VehicleType.bike:
+        _tankCapacityController.text = '15';
+        _mileageController.text = '40';
+        break;
+      case VehicleType.ev:
+        _tankCapacityController.text = '50'; // kWh
+        _mileageController.text = '6'; // km/kWh
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    _tankCapacityController.dispose();
+    _mileageController.dispose();
+    super.dispose();
+  }
+
+  void _updateVehicleFromInputs() {
+    final tankCapacity = double.tryParse(_tankCapacityController.text) ?? 45;
+    final mileage = double.tryParse(_mileageController.text) ?? 15;
+
+    final fuelType = _vehicleType == VehicleType.ev
+        ? FuelType.electric
+        : FuelType.petrol;
+
+    final vehicle = Vehicle(
+      name: _vehicleType == VehicleType.ev ? 'My EV' :
+            _vehicleType == VehicleType.bike ? 'My Bike' : 'My Car',
+      fuelType: fuelType,
+      tankCapacityLiters: tankCapacity,
+      mileage: mileage,
+    );
+
+    _vehicles = [vehicle];
+  }
+
+  double get _calculatedRange {
+    final tankCapacity = double.tryParse(_tankCapacityController.text) ?? 45;
+    final mileage = double.tryParse(_mileageController.text) ?? 15;
+    return tankCapacity * mileage;
   }
 
   @override
@@ -66,7 +133,8 @@ class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
                   ),
                   TextButton(
                     onPressed: () {
-                      widget.onSave(_preferences, _vehicleType);
+                      _updateVehicleFromInputs();
+                      widget.onSave(_preferences, _vehicleType, _vehicles);
                       Navigator.pop(context);
                     },
                     child: const Text('Save'),
@@ -85,6 +153,10 @@ class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
                 children: [
                   _buildSectionTitle('Vehicle Type'),
                   _buildVehicleSelector(),
+
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('Vehicle Details'),
+                  _buildVehicleDetails(),
 
                   const SizedBox(height: 24),
                   _buildSectionTitle('Driving Preferences'),
@@ -224,6 +296,79 @@ class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
     );
   }
 
+  Widget _buildVehicleDetails() {
+    final isEV = _vehicleType == VehicleType.ev;
+    final tankLabel = isEV ? 'Battery capacity (kWh)' : 'Tank capacity (L)';
+    final mileageLabel = isEV ? 'Efficiency (km/kWh)' : 'Mileage (km/L)';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _tankCapacityController,
+                    decoration: InputDecoration(
+                      labelText: tankLabel,
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _mileageController,
+                    decoration: InputDecoration(
+                      labelText: mileageLabel,
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.local_gas_station, color: AppTheme.primaryColor, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Estimated range: ${_calculatedRange.toStringAsFixed(0)} km',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Fuel stops will be planned based on your vehicle range (with 15% safety margin)',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildVehicleOption(VehicleType type, IconData icon, String label) {
     final isSelected = _vehicleType == type;
 
@@ -236,6 +381,8 @@ class _TripPreferencesSheetState extends State<TripPreferencesSheet> {
             if (type == VehicleType.ev) {
               _preferences = _preferences.copyWith(findEvStations: true);
             }
+            // Update default values for the new vehicle type
+            _setDefaultVehicleValues();
           });
         },
         child: AnimatedContainer(

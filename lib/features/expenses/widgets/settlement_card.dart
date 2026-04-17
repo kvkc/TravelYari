@@ -7,7 +7,8 @@ class SettlementCard extends StatelessWidget {
   final String toName;
   final double amount;
   final String currencySymbol;
-  final VoidCallback? onMarkPaid;
+  final VoidCallback? onSettle;
+  final bool isSettled;
 
   const SettlementCard({
     super.key,
@@ -15,77 +16,101 @@ class SettlementCard extends StatelessWidget {
     required this.toName,
     required this.amount,
     required this.currencySymbol,
-    this.onMarkPaid,
+    this.onSettle,
+    this.isSettled = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: isSettled ? Colors.green[50] : null,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           children: [
-            // From avatar
-            _buildAvatar(fromName, Colors.red[100]!, Colors.red[700]!),
+            Row(
+              children: [
+                // From avatar
+                _buildAvatar(fromName, isSettled ? Colors.grey[200]! : Colors.red[100]!, isSettled ? Colors.grey[600]! : Colors.red[700]!),
 
-            const SizedBox(width: 12),
+                const SizedBox(width: 12),
 
-            // Arrow with amount
-            Expanded(
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                // Arrow with amount
+                Expanded(
+                  child: Column(
                     children: [
-                      Container(
-                        height: 2,
-                        width: 30,
-                        color: Colors.grey[300],
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            height: 2,
+                            width: 30,
+                            color: Colors.grey[300],
                           ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryColor.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            '$currencySymbol${amount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryColor,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSettled
+                                    ? Colors.green[100]
+                                    : AppTheme.primaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                '$currencySymbol${amount.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isSettled ? Colors.green[700] : AppTheme.primaryColor,
+                                  decoration: isSettled ? TextDecoration.lineThrough : null,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                          Icon(
+                            isSettled ? Icons.check : Icons.arrow_forward,
+                            size: 20,
+                            color: isSettled ? Colors.green[700] : Colors.grey[400],
+                          ),
+                        ],
                       ),
-                      Icon(
-                        Icons.arrow_forward,
-                        size: 20,
-                        color: Colors.grey[400],
+                      const SizedBox(height: 4),
+                      Text(
+                        isSettled ? 'settled' : 'owes',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isSettled ? Colors.green[600] : Colors.grey[500],
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'owes',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // To avatar
+                _buildAvatar(toName, isSettled ? Colors.grey[200]! : Colors.green[100]!, isSettled ? Colors.grey[600]! : Colors.green[700]!),
+              ],
             ),
-
-            const SizedBox(width: 12),
-
-            // To avatar
-            _buildAvatar(toName, Colors.green[100]!, Colors.green[700]!),
+            if (onSettle != null && !isSettled) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onSettle,
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Mark as Settled'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.green[700],
+                    side: BorderSide(color: Colors.green[300]!),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

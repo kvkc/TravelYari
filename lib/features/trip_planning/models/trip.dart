@@ -2,6 +2,7 @@ import 'package:uuid/uuid.dart';
 import 'location.dart';
 import 'route_segment.dart';
 import 'day_plan.dart';
+import 'vehicle.dart';
 
 enum TripStatus {
   draft,
@@ -104,6 +105,8 @@ class Trip {
   final DateTime createdAt;
   final DateTime updatedAt;
   final TripPreferences preferences;
+  // Vehicle info for fuel planning
+  final List<Vehicle> vehicles;
   // Collaboration fields
   final String? ownerId;
   final List<TripParticipant> participants;
@@ -128,6 +131,7 @@ class Trip {
     DateTime? createdAt,
     DateTime? updatedAt,
     TripPreferences? preferences,
+    List<Vehicle>? vehicles,
     this.ownerId,
     List<TripParticipant>? participants,
     List<String>? participantIds,
@@ -143,8 +147,25 @@ class Trip {
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now(),
         preferences = preferences ?? TripPreferences(),
+        vehicles = vehicles ?? [],
         participants = participants ?? [],
         participantIds = participantIds ?? [];
+
+  /// Get the minimum fuel range among all vehicles (the limiting factor)
+  /// Returns null if no vehicles are configured
+  double? get minVehicleRange {
+    if (vehicles.isEmpty) return null;
+    return vehicles.map((v) => v.safeRange).reduce((a, b) => a < b ? a : b);
+  }
+
+  /// Check if any vehicle is electric
+  bool get hasElectricVehicle => vehicles.any((v) => v.isElectric);
+
+  /// Get the vehicle with the shortest range (limiting vehicle)
+  Vehicle? get limitingVehicle {
+    if (vehicles.isEmpty) return null;
+    return vehicles.reduce((a, b) => a.safeRange < b.safeRange ? a : b);
+  }
 
   Trip copyWith({
     String? name,
@@ -158,6 +179,7 @@ class Trip {
     int? estimatedDurationMinutes,
     DateTime? startDate,
     TripPreferences? preferences,
+    List<Vehicle>? vehicles,
     String? ownerId,
     List<TripParticipant>? participants,
     List<String>? participantIds,
@@ -181,6 +203,7 @@ class Trip {
       createdAt: createdAt,
       updatedAt: DateTime.now(),
       preferences: preferences ?? this.preferences,
+      vehicles: vehicles ?? this.vehicles,
       ownerId: ownerId ?? this.ownerId,
       participants: participants ?? this.participants,
       participantIds: participantIds ?? this.participantIds,
@@ -207,6 +230,7 @@ class Trip {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'preferences': preferences.toJson(),
+      'vehicles': vehicles.map((v) => v.toJson()).toList(),
       'ownerId': ownerId,
       'participants': participants.map((p) => p.toJson()).toList(),
       'participantIds': participantIds,
@@ -253,6 +277,10 @@ class Trip {
       preferences: json['preferences'] != null
           ? TripPreferences.fromJson(Map<String, dynamic>.from(json['preferences']))
           : TripPreferences(),
+      vehicles: (json['vehicles'] as List?)
+              ?.map((v) => Vehicle.fromJson(Map<String, dynamic>.from(v)))
+              .toList() ??
+          [],
       ownerId: json['ownerId'],
       participants: (json['participants'] as List?)
               ?.map((p) => TripParticipant.fromJson(Map<String, dynamic>.from(p)))

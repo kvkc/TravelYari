@@ -18,7 +18,7 @@ dependencies:
   google_maps_flutter: ^2.5.3
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
-  geolocator: ^10.1.0
+  geolocator: ^12.0.0
   geocoding: ^2.1.1
   flutter_polyline_points: ^2.0.0
 
@@ -51,7 +51,7 @@ dependencies:
 
   # Deep Links & Sharing
   receive_sharing_intent: ^1.6.7
-  uni_links: ^0.5.1
+  app_links: ^6.3.2
   share_plus: ^7.2.1
 
   # Utils
@@ -71,6 +71,14 @@ dev_dependencies:
   retrofit_generator: ^8.0.6
   hive_generator: ^2.0.1
   json_serializable: ^6.7.1
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#1a237e"
+  adaptive_icon_foreground: "assets/icons/app_icon.png"
 
 flutter:
   uses-material-design: true

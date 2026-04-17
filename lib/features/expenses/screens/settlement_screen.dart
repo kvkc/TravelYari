@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../trip_planning/models/trip.dart';
 import '../models/currency.dart';
+import '../models/expense.dart';
 import '../models/settlement.dart';
 import '../services/expense_service.dart';
 import '../widgets/settlement_card.dart';
@@ -33,6 +34,7 @@ class _SettlementScreenState extends ConsumerState<SettlementScreen> {
   }
 
   Future<void> _loadSettlement() async {
+    setState(() => _isLoading = true);
     final service = ref.read(expenseServiceProvider);
     final settlement = await service.calculateSettlement(
       tripId: widget.trip.id,
@@ -58,6 +60,131 @@ class _SettlementScreenState extends ConsumerState<SettlementScreen> {
     return '$symbol${amount.toStringAsFixed(2)}';
   }
 
+  Future<void> _settleDebt(DebtRecord debt) async {
+    final from = _getParticipant(debt.fromParticipantId);
+    final to = _getParticipant(debt.toParticipantId);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Settlement'),
+        content: Text(
+          '${from?.name ?? "Unknown"} paid ${_formatAmount(debt.amount)} to ${to?.name ?? "Unknown"}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      // Create a settlement expense (from person pays to person)
+      final expense = Expense(
+        tripId: widget.trip.id,
+        description: 'Settlement: ${from?.name ?? "Unknown"} → ${to?.name ?? "Unknown"}',
+        category: 'Settlement',
+        amount: debt.amount,
+        currencyCode: debt.currencyCode,
+        paidByParticipantId: debt.fromParticipantId,
+        splitType: SplitType.unequal,
+        shares: [
+          ExpenseShare(
+            participantId: debt.toParticipantId,
+            amount: debt.amount,
+            isIncluded: true,
+          ),
+        ],
+      );
+
+      await ref.read(expenseServiceProvider).addExpense(expense);
+
+      // Reload settlement
+      await _loadSettlement();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Settlement recorded: ${from?.name} → ${to?.name}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _settleAll() async {
+    final debts = _settlement?.simplifiedDebts ?? [];
+    if (debts.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Settle All'),
+        content: Text(
+          'Record ${debts.length} settlement${debts.length > 1 ? "s" : ""}?\n\n'
+          'This will add settlement expenses to balance all debts.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Settle All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final service = ref.read(expenseServiceProvider);
+
+      for (final debt in debts) {
+        final from = _getParticipant(debt.fromParticipantId);
+        final to = _getParticipant(debt.toParticipantId);
+
+        final expense = Expense(
+          tripId: widget.trip.id,
+          description: 'Settlement: ${from?.name ?? "Unknown"} → ${to?.name ?? "Unknown"}',
+          category: 'Settlement',
+          amount: debt.amount,
+          currencyCode: debt.currencyCode,
+          paidByParticipantId: debt.fromParticipantId,
+          splitType: SplitType.unequal,
+          shares: [
+            ExpenseShare(
+              participantId: debt.toParticipantId,
+              amount: debt.amount,
+              isIncluded: true,
+            ),
+          ],
+        );
+        await service.addExpense(expense);
+      }
+
+      await _loadSettlement();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('All ${debts.length} settlements recorded!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -69,10 +196,19 @@ class _SettlementScreenState extends ConsumerState<SettlementScreen> {
 
     final settlement = _settlement!;
     final participants = widget.trip.participants;
+    final hasUnsettledDebts = settlement.simplifiedDebts.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settlement'),
+        actions: [
+          if (hasUnsettledDebts)
+            TextButton.icon(
+              onPressed: _settleAll,
+              icon: const Icon(Icons.check_circle, color: Colors.white, size: 18),
+              label: const Text('Settle All', style: TextStyle(color: Colors.white)),
+            ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -228,6 +364,7 @@ class _SettlementScreenState extends ConsumerState<SettlementScreen> {
                 toName: to?.name ?? 'Unknown',
                 amount: debt.amount,
                 currencySymbol: TripCurrency.getSymbol(debt.currencyCode),
+                onSettle: () => _settleDebt(debt),
               );
             }),
           ] else ...[

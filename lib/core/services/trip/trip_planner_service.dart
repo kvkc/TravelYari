@@ -5,6 +5,7 @@ import '../../../features/trip_planning/models/location.dart';
 import '../../../features/trip_planning/models/route_segment.dart';
 import '../../../features/trip_planning/models/day_plan.dart';
 import '../../../features/trip_planning/models/amenity.dart';
+import '../../../features/trip_planning/models/vehicle.dart';
 import '../route/route_optimizer.dart';
 import '../amenities/amenities_service.dart';
 import '../map/unified_map_service.dart';
@@ -104,6 +105,8 @@ class TripPlannerService {
         routeSegments: segments,
         preferences: prefs,
         startDate: startDate ?? DateTime.now(),
+        vehicleRange: trip.minVehicleRange,
+        hasEV: trip.hasElectricVehicle,
       ).timeout(const Duration(seconds: 45), onTimeout: () => <DayPlan>[]);
     }
 
@@ -137,10 +140,14 @@ class TripPlannerService {
 
   /// Generate day-by-day plans respecting daily distance limits
   /// Handles long segments by splitting them into multiple days
+  /// [vehicleRange] - the minimum safe range among all vehicles (in km)
+  /// [hasEV] - whether any vehicle is electric
   Future<List<DayPlan>> _generateDayPlans({
     required List<RouteSegment> routeSegments,
     required TripPreferences preferences,
     required DateTime startDate,
+    double? vehicleRange,
+    bool hasEV = false,
   }) async {
     List<DayPlan> dayPlans = [];
     double accumulatedDistance = 0;
@@ -254,13 +261,16 @@ class TripPlannerService {
               final breakType = _determineBreakType(estimatedArrival, preferences.breakDurationMinutes);
               final breakDuration = isMealBreak ? 45 : preferences.breakDurationMinutes;
 
+              // Find actual POI near the calculated break location
+              final breakLocation = await _findBreakPOI(
+                lat: breakLat,
+                lng: breakLng,
+                breakType: breakType,
+                fallbackName: isMealBreak ? 'Meal Break $b' : 'Tea/Rest Break $b',
+              );
+
               stops.add(PlannedStop(
-                location: TripLocation(
-                  name: isMealBreak ? 'Meal Break ${b}' : 'Tea/Rest Break ${b}',
-                  latitude: breakLat,
-                  longitude: breakLng,
-                  source: LocationSource.openStreetMap,
-                ),
+                location: breakLocation,
                 type: breakType,
                 plannedDurationMinutes: breakDuration,
                 distanceFromPreviousKm: breakInterval,
@@ -269,23 +279,28 @@ class TripPlannerService {
             }
           }
 
-          // Add fuel stop if needed (roughly every 300km)
-          if (distancePerDay > 250 && (preferences.findPetrolStations || preferences.findEvStations)) {
+          // Add fuel stop if needed based on vehicle range
+          // Default to 300km range if no vehicle configured
+          final fuelRange = vehicleRange ?? 300;
+          final needsFuel = preferences.findPetrolStations || preferences.findEvStations || hasEV;
+          if (distancePerDay > fuelRange * 0.7 && needsFuel) {
             final fuelFraction = prevFraction + (fraction - prevFraction) * 0.6;
             final fuelLat = segment.start.latitude +
                 (segment.end.latitude - segment.start.latitude) * fuelFraction;
             final fuelLng = segment.start.longitude +
                 (segment.end.longitude - segment.start.longitude) * fuelFraction;
 
+            // Find actual fuel station near the calculated location
+            final fuelLocation = await _findFuelStationPOI(
+              lat: fuelLat,
+              lng: fuelLng,
+              isEV: hasEV || preferences.findEvStations,
+            );
+
             stops.add(PlannedStop(
-              location: TripLocation(
-                name: preferences.findEvStations ? 'EV Charging Stop' : 'Fuel Stop',
-                latitude: fuelLat,
-                longitude: fuelLng,
-                source: LocationSource.openStreetMap,
-              ),
+              location: fuelLocation,
               type: StopType.fuelStop,
-              plannedDurationMinutes: preferences.findEvStations ? 30 : 15,
+              plannedDurationMinutes: (hasEV || preferences.findEvStations) ? 30 : 15,
               distanceFromPreviousKm: distancePerDay * 0.6,
             ));
           }
@@ -402,13 +417,16 @@ class TripPlannerService {
           final breakType = _determineBreakType(estimatedArrival, preferences.breakDurationMinutes);
           final breakDuration = isMealBreak ? 45 : preferences.breakDurationMinutes;
 
+          // Find actual POI near the calculated break location
+          final breakLocation = await _findBreakPOI(
+            lat: breakLat,
+            lng: breakLng,
+            breakType: breakType,
+            fallbackName: isMealBreak ? 'Meal Break' : 'Tea/Rest Break',
+          );
+
           currentDayStops.add(PlannedStop(
-            location: TripLocation(
-              name: isMealBreak ? 'Meal Break' : 'Tea/Rest Break',
-              latitude: breakLat,
-              longitude: breakLng,
-              source: LocationSource.openStreetMap,
-            ),
+            location: breakLocation,
             type: breakType,
             plannedDurationMinutes: breakDuration,
             distanceFromPreviousKm: segment.distanceKm * breakFraction,
@@ -417,22 +435,26 @@ class TripPlannerService {
         }
       }
 
-      // Add fuel stop for longer segments
-      if (segment.distanceKm > 200 && (preferences.findPetrolStations || preferences.findEvStations)) {
+      // Add fuel stop for longer segments based on vehicle range
+      final fuelRange = vehicleRange ?? 300;
+      final needsFuel = preferences.findPetrolStations || preferences.findEvStations || hasEV;
+      if (segment.distanceKm > fuelRange * 0.7 && needsFuel) {
         final fuelLat = segment.start.latitude +
             (segment.end.latitude - segment.start.latitude) * 0.5;
         final fuelLng = segment.start.longitude +
             (segment.end.longitude - segment.start.longitude) * 0.5;
 
+        // Find actual fuel station near the calculated location
+        final fuelLocation = await _findFuelStationPOI(
+          lat: fuelLat,
+          lng: fuelLng,
+          isEV: hasEV || preferences.findEvStations,
+        );
+
         currentDayStops.add(PlannedStop(
-          location: TripLocation(
-            name: preferences.findEvStations ? 'EV Charging Stop' : 'Fuel Stop',
-            latitude: fuelLat,
-            longitude: fuelLng,
-            source: LocationSource.openStreetMap,
-          ),
+          location: fuelLocation,
           type: StopType.fuelStop,
-          plannedDurationMinutes: preferences.findEvStations ? 30 : 15,
+          plannedDurationMinutes: (hasEV || preferences.findEvStations) ? 30 : 15,
           distanceFromPreviousKm: segment.distanceKm * 0.5,
         ));
       }
@@ -667,6 +689,107 @@ class TripPlannerService {
       return StopType.mealBreak;
     }
     return StopType.teaBreak;
+  }
+
+  /// Find a nearby POI for a break location
+  /// Returns the POI location if found, otherwise falls back to the calculated location
+  Future<TripLocation> _findBreakPOI({
+    required double lat,
+    required double lng,
+    required StopType breakType,
+    required String fallbackName,
+  }) async {
+    try {
+      final searchRadius = 10000; // 10km radius
+
+      String poiType;
+      switch (breakType) {
+        case StopType.mealBreak:
+          poiType = 'restaurant';
+          break;
+        case StopType.teaBreak:
+          poiType = 'cafe';
+          break;
+        case StopType.fuelStop:
+          poiType = 'fuel';
+          break;
+        default:
+          poiType = 'restaurant';
+      }
+
+      final results = await _mapService.searchNearby(
+        lat,
+        lng,
+        type: poiType,
+        radiusMeters: searchRadius,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => <TripLocation>[]);
+
+      if (results.isNotEmpty) {
+        // Return the first (closest/best) result
+        final poi = results.first;
+        return TripLocation(
+          name: poi.name,
+          address: poi.address,
+          latitude: poi.latitude,
+          longitude: poi.longitude,
+          source: poi.source,
+          placeId: poi.placeId,
+          metadata: poi.metadata,
+        );
+      }
+    } catch (e) {
+      print('Failed to find break POI: $e');
+    }
+
+    // Fallback to calculated location
+    return TripLocation(
+      name: fallbackName,
+      latitude: lat,
+      longitude: lng,
+      source: LocationSource.openStreetMap,
+    );
+  }
+
+  /// Find a nearby fuel station
+  Future<TripLocation> _findFuelStationPOI({
+    required double lat,
+    required double lng,
+    required bool isEV,
+  }) async {
+    try {
+      final searchRadius = 15000; // 15km radius for fuel stations
+      final poiType = isEV ? 'charging_station' : 'fuel';
+
+      final results = await _mapService.searchNearby(
+        lat,
+        lng,
+        type: poiType,
+        radiusMeters: searchRadius,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => <TripLocation>[]);
+
+      if (results.isNotEmpty) {
+        final poi = results.first;
+        return TripLocation(
+          name: poi.name,
+          address: poi.address,
+          latitude: poi.latitude,
+          longitude: poi.longitude,
+          source: poi.source,
+          placeId: poi.placeId,
+          metadata: poi.metadata,
+        );
+      }
+    } catch (e) {
+      print('Failed to find fuel station POI: $e');
+    }
+
+    // Fallback to calculated location
+    return TripLocation(
+      name: isEV ? 'EV Charging Stop' : 'Fuel Stop',
+      latitude: lat,
+      longitude: lng,
+      source: LocationSource.openStreetMap,
+    );
   }
 
   /// Calculate estimated arrival time at a stop

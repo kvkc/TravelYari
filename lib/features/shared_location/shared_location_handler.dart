@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
-import 'package:uni_links/uni_links.dart';
+import 'package:app_links/app_links.dart';
 
 import '../../core/services/sync/trip_sync_service.dart';
 import '../../core/router/app_router.dart';
@@ -60,16 +60,18 @@ class SharedLocationHandler {
       });
     }
 
-    // Handle deep links (maps URLs) - only on mobile
+    // Handle deep links (maps URLs and invite links)
     if (!kIsWeb) {
-      _linkSubscription = linkStream.listen(
-        _handleDeepLink,
+      final appLinks = AppLinks();
+
+      _linkSubscription = appLinks.uriLinkStream.listen(
+        (uri) => _handleDeepLink(uri.toString()),
         onError: (e) => print('Deep link error: $e'),
       );
 
       // Handle initial deep link
-      getInitialLink().then((link) {
-        if (link != null) _handleDeepLink(link);
+      appLinks.getInitialLink().then((uri) {
+        if (uri != null) _handleDeepLink(uri.toString());
       });
     }
   }
@@ -99,11 +101,15 @@ class SharedLocationHandler {
 
   /// Check if the link is a trip invite link
   static bool _isInviteLink(String link) {
-    // Handle both custom scheme and web URL formats
+    // Handle custom scheme, web URLs, and Firebase Hosting URLs
     // travelyari://join?code=XXX
     // https://travelyari.app/join?code=XXX
+    // https://yatraplanner-50f70.web.app/join?code=XXX
+    // https://yatraplanner-50f70.firebaseapp.com/join?code=XXX
     return link.contains('travelyari://join') ||
-           link.contains('travelyari.app/join');
+           link.contains('travelyari.app/join') ||
+           link.contains('yatraplanner-50f70.web.app/join') ||
+           link.contains('yatraplanner-50f70.firebaseapp.com/join');
   }
 
   /// Handle trip invite deep link
@@ -117,27 +123,14 @@ class SharedLocationHandler {
         return;
       }
 
-      // Join the trip using the share code
-      final syncService = _ref!.read(tripSyncServiceProvider.notifier);
-      final trip = await syncService.joinTripByShareCode(shareCode);
+      debugPrint('Handling invite link with code: $shareCode');
 
-      if (trip != null) {
-        debugPrint('Successfully joined trip: ${trip.name}');
-
-        // Notify callback if set
-        if (_onTripJoined != null) {
-          _onTripJoined!(trip);
-        }
-
-        // Navigate to the trip if navigator key is available
-        if (_navigatorKey?.currentState != null) {
-          _navigatorKey!.currentState!.pushNamed(
-            AppRouter.tripPlanning,
-            arguments: {'tripId': trip.id},
-          );
-        }
-      } else {
-        debugPrint('Failed to join trip with code: $shareCode');
+      // Navigate to JoinTripScreen with the code for better UX
+      if (_navigatorKey?.currentState != null) {
+        _navigatorKey!.currentState!.pushNamed(
+          AppRouter.joinTrip,
+          arguments: {'code': shareCode},
+        );
       }
     } catch (e) {
       debugPrint('Error handling invite link: $e');

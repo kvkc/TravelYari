@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../features/trip_planning/models/trip.dart';
 import '../../features/trip_planning/models/location.dart';
@@ -74,17 +75,33 @@ class StorageService {
   }
 
   static List<Expense> getTripExpenses(String tripId) {
-    return _expensesBox.values
-        .map((data) => Expense.fromJson(Map<String, dynamic>.from(data)))
-        .where((e) => e.tripId == tripId)
-        .toList()
-      ..sort((a, b) => b.expenseDate.compareTo(a.expenseDate));
+    final expenses = <Expense>[];
+    for (final data in _expensesBox.values) {
+      try {
+        final expense = Expense.fromJson(Map<String, dynamic>.from(data));
+        if (expense.tripId == tripId) {
+          expenses.add(expense);
+        }
+      } catch (e) {
+        // Skip corrupted expense data
+        debugPrint('Failed to parse expense: $e');
+      }
+    }
+    expenses.sort((a, b) => b.expenseDate.compareTo(a.expenseDate));
+    return expenses;
   }
 
   static List<Expense> getAllExpenses() {
-    return _expensesBox.values
-        .map((data) => Expense.fromJson(Map<String, dynamic>.from(data)))
-        .toList();
+    final expenses = <Expense>[];
+    for (final data in _expensesBox.values) {
+      try {
+        expenses.add(Expense.fromJson(Map<String, dynamic>.from(data)));
+      } catch (e) {
+        // Skip corrupted expense data
+        debugPrint('Failed to parse expense: $e');
+      }
+    }
+    return expenses;
   }
 
   static Future<void> deleteExpense(String id) async {

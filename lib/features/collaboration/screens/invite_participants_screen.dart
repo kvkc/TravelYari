@@ -25,15 +25,25 @@ class _InviteParticipantsScreenState
     extends ConsumerState<InviteParticipantsScreen> {
   String? _shareCode;
   String? _shareLink;
-  bool _isLoading = true;
+  bool _isLoading = false;
+  String? _errorMsg;
 
   @override
   void initState() {
     super.initState();
-    _generateShareCode();
+    // Check if trip already has share code
+    if (widget.trip.shareCode != null && widget.trip.shareCode!.isNotEmpty) {
+      _shareCode = widget.trip.shareCode;
+      _shareLink = 'https://yatraplanner-50f70.web.app/join?code=$_shareCode';
+    }
   }
 
   Future<void> _generateShareCode() async {
+    setState(() {
+      _isLoading = true;
+      _errorMsg = null;
+    });
+
     // Prompt for name if not set (first time sharing)
     final savedName = StorageService.getSetting<String>('user_name');
     if ((savedName == null || savedName.isEmpty) && mounted) {
@@ -43,16 +53,31 @@ class _InviteParticipantsScreenState
       }
     }
 
-    final inviteService = ref.read(inviteServiceProvider);
-    final code = await inviteService.getShareCode(widget.trip);
-    if (code != null && mounted) {
-      setState(() {
-        _shareCode = code;
-        _shareLink = inviteService.generateInviteLink(code);
-        _isLoading = false;
-      });
-    } else if (mounted) {
-      setState(() => _isLoading = false);
+    try {
+      final inviteService = ref.read(inviteServiceProvider);
+      final code = await inviteService.getShareCode(widget.trip).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => null,
+      );
+      if (code != null && mounted) {
+        setState(() {
+          _shareCode = code;
+          _shareLink = inviteService.generateInviteLink(code);
+          _isLoading = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMsg = 'Failed to generate code. Check your internet connection.';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMsg = 'Error: $e';
+        });
+      }
     }
   }
 
@@ -60,7 +85,7 @@ class _InviteParticipantsScreenState
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
       builder: (context) => AlertDialog(
         title: const Text('Your Name'),
         content: TextField(
@@ -73,6 +98,10 @@ class _InviteParticipantsScreenState
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Skip'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
             child: const Text('Continue'),
@@ -160,7 +189,37 @@ class _InviteParticipantsScreenState
 
               // Share code
               if (_isLoading)
-                const CircularProgressIndicator()
+                const Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Generating share code...'),
+                  ],
+                )
+              else if (_errorMsg != null)
+                Column(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red, size: 48),
+                    const SizedBox(height: 8),
+                    Text(_errorMsg!, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _generateShareCode,
+                      child: const Text('Try Again'),
+                    ),
+                  ],
+                )
+              else if (_shareCode == null)
+                ElevatedButton.icon(
+                  onPressed: _generateShareCode,
+                  icon: const Icon(Icons.link),
+                  label: const Text('Generate Invite Code'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  ),
+                )
               else if (_shareCode != null) ...[
                 // Code display
                 GestureDetector(

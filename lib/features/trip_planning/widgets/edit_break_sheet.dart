@@ -378,25 +378,37 @@ class _EditBreakSheetState extends State<EditBreakSheet> {
 
   Future<void> _openInGoogleMaps() async {
     final location = widget.stop.location;
-    final encodedName = Uri.encodeComponent(location.name);
+    final lat = location.latitude;
+    final lng = location.longitude;
 
-    // Search for places of the appropriate type nearby
-    String searchQuery;
+    // Determine search term based on stop type
+    String? searchTerm;
     switch (_selectedType) {
       case StopType.teaBreak:
-        searchQuery = 'cafe+near+${location.latitude},${location.longitude}';
+        searchTerm = 'cafe';
         break;
       case StopType.mealBreak:
-        searchQuery = 'restaurant+near+${location.latitude},${location.longitude}';
+        searchTerm = 'restaurant';
         break;
       case StopType.fuelStop:
-        searchQuery = 'petrol+station+near+${location.latitude},${location.longitude}';
+        searchTerm = 'petrol pump';
         break;
       default:
-        searchQuery = encodedName;
+        searchTerm = null;
     }
 
-    final url = 'https://www.google.com/maps/search/$searchQuery';
+    // Use Google Maps URL format that positions the map at the stop location
+    // Format: https://www.google.com/maps/search/QUERY/@LAT,LNG,15z
+    final String url;
+    if (searchTerm != null) {
+      // Search for nearby places, centered at the stop location with zoom level 15
+      final encodedQuery = Uri.encodeComponent(searchTerm);
+      url = 'https://www.google.com/maps/search/$encodedQuery/@$lat,$lng,15z';
+    } else {
+      // Just navigate to the exact location
+      url = 'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+    }
+
     final uri = Uri.parse(url);
 
     if (await canLaunchUrl(uri)) {

@@ -15,6 +15,7 @@ import '../models/location.dart';
 import '../widgets/location_list_item.dart';
 import '../widgets/trip_preferences_sheet.dart';
 import '../widgets/trip_stats_card.dart';
+import '../widgets/vehicle_management_sheet.dart';
 
 class TripPlanningScreen extends ConsumerStatefulWidget {
   final String? tripId;
@@ -166,7 +167,12 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
   /// Fetch latest trip from Firestore and update local state
   Future<void> _fetchLatestFromCloud() async {
     final syncService = ref.read(tripSyncServiceProvider.notifier);
+    debugPrint('_fetchLatestFromCloud: isSyncAvailable=${syncService.isSyncAvailable}');
     final remoteTrip = await syncService.refreshTrip(_trip.id);
+    debugPrint('_fetchLatestFromCloud: remoteTrip=${remoteTrip != null ? "found" : "null"}');
+    if (remoteTrip != null) {
+      debugPrint('_fetchLatestFromCloud: remote participants=${remoteTrip.participants.length}');
+    }
     if (remoteTrip != null && mounted) {
       setState(() => _trip = remoteTrip);
     }
@@ -364,12 +370,35 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
       builder: (context) => TripPreferencesSheet(
         preferences: _trip.preferences,
         vehicleType: _trip.vehicleType,
-        onSave: (preferences, vehicleType) {
+        vehicles: _trip.vehicles,
+        onSave: (preferences, vehicleType, vehicles) {
           setState(() {
             _trip = _trip.copyWith(
               preferences: preferences,
               vehicleType: vehicleType,
+              vehicles: vehicles,
             );
+          });
+          _saveTrip();
+        },
+      ),
+    );
+  }
+
+  void _showVehicles() {
+    final currentUserId = StorageService.getSetting<String>('device_id');
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => VehicleManagementSheet(
+        trip: _trip,
+        currentUserId: currentUserId,
+        onSave: (vehicles) {
+          setState(() {
+            _trip = _trip.copyWith(vehicles: vehicles);
           });
           _saveTrip();
         },
@@ -506,6 +535,32 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
             tooltip: 'Expenses',
           ),
           IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.directions_car),
+                if (_trip.vehicles.isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${_trip.vehicles.length}',
+                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _showVehicles,
+            tooltip: 'Trip Vehicles',
+          ),
+          IconButton(
             icon: const Icon(Icons.tune),
             onPressed: _showPreferences,
             tooltip: 'Trip Preferences',
@@ -541,7 +596,18 @@ class _TripPlanningScreenState extends ConsumerState<TripPlanningScreen> {
     );
   }
 
-  void _showParticipants() {
+  void _showParticipants() async {
+    // Fetch latest from cloud first
+    await _fetchLatestFromCloud();
+
+    if (!mounted) return;
+
+    // Debug logging
+    debugPrint('_showParticipants: trip.participants.length=${_trip.participants.length}');
+    for (var p in _trip.participants) {
+      debugPrint('  - ${p.name} (userId=${p.userId}, role=${p.role})');
+    }
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(

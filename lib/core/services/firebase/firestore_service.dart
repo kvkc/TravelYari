@@ -26,20 +26,31 @@ class FirestoreService {
 
   /// Save/update a full trip to Firestore (used for share/join only)
   /// Content edits use updateTripContent() instead
-  Future<bool> saveTrip(Trip trip, String userId) async {
-    if (_tripsCollection == null) return false;
+  Future<bool> saveTrip(Trip trip, String userId, {String? deviceId}) async {
+    if (_tripsCollection == null) {
+      debugPrint('saveTrip: _tripsCollection is null');
+      return false;
+    }
 
     try {
       final tripData = trip.toJson();
-      tripData['ownerId'] = userId;
-      tripData['lastModifiedBy'] = userId;
+      // Only set ownerId if not already set (preserve original owner)
+      if (trip.ownerId == null || trip.ownerId!.isEmpty) {
+        tripData['ownerId'] = userId;
+      }
+      // Use deviceId for lastModifiedBy if provided, for proper echo detection
+      tripData['lastModifiedBy'] = deviceId ?? userId;
       tripData['lastModifiedAt'] = FieldValue.serverTimestamp();
+
+      debugPrint('saveTrip: attempting to save trip ${trip.id} with ${trip.participants.length} participants');
+      debugPrint('saveTrip: userId=$userId, ownerId=${trip.ownerId}');
 
       await _tripsCollection!.doc(trip.id).set(tripData, SetOptions(merge: true));
       debugPrint('Trip saved to Firestore: ${trip.id}');
       return true;
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint('Failed to save trip: $e');
+      debugPrint('Stack: $stack');
       return false;
     }
   }
@@ -201,15 +212,79 @@ class FirestoreService {
     return null;
   }
 
-  /// Add a participant to a trip
-  Future<bool> addParticipant(String tripId, String participantUserId) async {
+  /// Add a participant to a trip (updates both participantIds and participants array)
+  /// If replaceParticipantId is provided, removes that entry first (for phone linking)
+  /// deviceId is used for lastModifiedBy to enable proper echo detection
+  Future<bool> addParticipant(String tripId, String participantUserId, {
+    TripParticipant? participant,
+    String? replaceParticipantId,
+    String? deviceId,
+  }) async {
     if (_tripsCollection == null) return false;
 
     try {
-      await _tripsCollection!.doc(tripId).update({
-        'participantIds': FieldValue.arrayUnion([participantUserId]),
-      });
-      debugPrint('Participant added: $participantUserId to $tripId');
+      // Use a transaction for safe read-modify-write when replacing
+      if (replaceParticipantId != null && participant != null) {
+        await _firestore!.runTransaction((transaction) async {
+          final docRef = _tripsCollection!.doc(tripId);
+          final snapshot = await transaction.get(docRef);
+
+          if (!snapshot.exists) return;
+
+          final data = snapshot.data()!;
+          final participants = (data['participants'] as List?)
+              ?.map((p) => Map<String, dynamic>.from(p))
+              .toList() ?? [];
+
+          // Remove old entry and add new one
+          participants.removeWhere((p) => p['id'] == replaceParticipantId);
+          participants.add(participant.toJson());
+
+          final participantIds = List<String>.from(data['participantIds'] ?? []);
+          if (!participantIds.contains(participantUserId)) {
+            participantIds.add(participantUserId);
+          }
+
+          final updates = <String, dynamic>{
+            'participants': participants,
+            'participantIds': participantIds,
+            'lastModifiedAt': FieldValue.serverTimestamp(),
+          };
+          if (deviceId != null) {
+            updates['lastModifiedBy'] = deviceId;
+          }
+
+          transaction.update(docRef, updates);
+        });
+      } else {
+        // Simple atomic add for new participants
+        final updates = <String, dynamic>{
+          'participantIds': FieldValue.arrayUnion([participantUserId]),
+          'lastModifiedAt': FieldValue.serverTimestamp(),
+        };
+
+        if (participant != null) {
+          updates['participants'] = FieldValue.arrayUnion([participant.toJson()]);
+        }
+
+        if (deviceId != null) {
+          updates['lastModifiedBy'] = deviceId;
+        }
+
+        await _tripsCollection!.doc(tripId).update(updates);
+      }
+
+      debugPrint('Participant added: $participantUserId to $tripId (deviceId=$deviceId)');
+
+      // Verify by reading back
+      final verify = await getTrip(tripId);
+      if (verify != null) {
+        debugPrint('Verified participants count: ${verify.participants.length}');
+        for (var p in verify.participants) {
+          debugPrint('  - ${p.name} (userId=${p.userId})');
+        }
+      }
+
       return true;
     } catch (e) {
       debugPrint('Failed to add participant: $e');
