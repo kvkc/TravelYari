@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Yatra Planner</string>
+	<string>TravelYari</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -62,7 +62,7 @@
 
 	<!-- Google Maps API Key -->
 	<key>GMSApiKey</key>
-	<string>YOUR_GOOGLE_MAPS_API_KEY</string>
+	<string>AIzaSyCPqhDmAbdepe98fXwnt1sLdlFnoF4mTPI</string>
 
 	<!-- URL Schemes for deep linking -->
 	<key>CFBundleURLTypes</key>
